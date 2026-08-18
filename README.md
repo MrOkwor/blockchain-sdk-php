@@ -1,9 +1,9 @@
 # Blockchain SDK for PHP
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/blockchain-sdk/blockchain-sdk-php.svg?style=flat-square)](https://packagist.org/packages/blockchain-sdk/blockchain-sdk-php)
-[![Total Downloads](https://img.shields.io/packagist/dt/blockchain-sdk/blockchain-sdk-php.svg?style=flat-square)](https://packagist.org/packages/blockchain-sdk/blockchain-sdk-php)
-[![PHP Version Require](https://img.shields.io/packagist/dependency-v/blockchain-sdk/blockchain-sdk-php/php?style=flat-square)](https://php.net)
-[![License](https://img.shields.io/packagist/l/blockchain-sdk/blockchain-sdk-php.svg?style=flat-square)](LICENSE.md)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/mrokwor/blockchain-sdk-php.svg?style=flat-square)](https://packagist.org/packages/mrokwor/blockchain-sdk-php)
+[![Total Downloads](https://img.shields.io/packagist/dt/mrokwor/blockchain-sdk-php.svg?style=flat-square)](https://packagist.org/packages/mrokwor/blockchain-sdk-php)
+[![PHP Version Require](https://img.shields.io/packagist/dependency-v/mrokwor/blockchain-sdk-php/php?style=flat-square)](https://php.net)
+[![License](https://img.shields.io/packagist/l/mrokwor/blockchain-sdk-php.svg?style=flat-square)](LICENSE.md)
 
 A high-performance, **zero-third-party-cryptography** blockchain SDK for PHP 8.2+ and Laravel. Generate multi-chain custodial/deposit addresses, sign transactions locally and offline, estimate network fees, query token balances, auto-fuel gas to deposit sub-wallets, track deposits with database models, and sweep customer funds into master cold vaults across **17+ supported blockchains** including **EVM (Ethereum, BNB Smart Chain, Polygon, Arbitrum, Base, Optimism, Avalanche, Fantom, Cronos, Linea, Scroll, zkSync, Celo, Mantle)**, **Solana**, **Bitcoin (Native SegWit Bech32)**, and **TRON**.
 
@@ -65,7 +65,7 @@ The SDK supports **17 individual network drivers** out of the box:
 Install the package via Composer:
 
 ```bash
-composer require blockchain-sdk/blockchain-sdk-php
+composer require mrokwor/blockchain-sdk-php
 ```
 
 ---
@@ -474,7 +474,7 @@ Run the package test suite with PHPUnit:
 composer test
 
 # Within Laravel
-php artisan test vendor/blockchain-sdk/blockchain-sdk-php/tests/BlockchainSdkTest.php
+php artisan test vendor/mrokwor/blockchain-sdk-php/tests/BlockchainSdkTest.php
 ```
 
 ### Security Best Practices
