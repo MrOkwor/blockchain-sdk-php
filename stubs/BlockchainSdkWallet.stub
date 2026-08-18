@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Models;
+
+use BlockchainSdk\Laravel\Facades\Blockchain;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class BlockchainSdkWallet extends Model
+{
+    protected $table = 'blockchainsdk_wallets';
+
+    protected $guarded = [];
+
+    protected $casts = [
+        'private_key' => 'encrypted',
+        'is_active'   => 'boolean',
+    ];
+
+    public function deposits(): HasMany
+    {
+        return $this->hasMany(BlockchainSdkDeposit::class, 'wallet_id');
+    }
+
+    public function sweeps(): HasMany
+    {
+        return $this->hasMany(BlockchainSdkSweep::class, 'wallet_id');
+    }
+
+    public static function createForUser(mixed $userId, string $network): self
+    {
+        $keypair = Blockchain::driver($network)->generateWallet();
+
+        return self::create([
+            'user_id'     => $userId,
+            'network'     => strtolower($network),
+            'address'     => $keypair->address,
+            'private_key' => $keypair->privateKey,
+            'public_key'  => $keypair->publicKey,
+            'mnemonic'    => $keypair->mnemonic,
+            'is_active'   => true,
+        ]);
+    }
+}

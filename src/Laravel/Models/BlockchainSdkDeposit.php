@@ -1,0 +1,45 @@
+<?php
+
+namespace BlockchainSdk\Laravel\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class BlockchainSdkDeposit extends Model
+{
+    protected $table = 'blockchainsdk_deposits';
+
+    protected $guarded = [];
+
+    protected $casts = [
+        'amount'       => 'decimal:8',
+        'is_credited'  => 'boolean',
+        'is_swept'     => 'boolean',
+        'credited_at'  => 'datetime',
+        'swept_at'     => 'datetime',
+    ];
+
+    public function wallet(): BelongsTo
+    {
+        return $this->belongsTo(BlockchainSdkWallet::class, 'wallet_id');
+    }
+
+    public function markAsCredited(): bool
+    {
+        return $this->update([
+            'is_credited' => true,
+            'status'      => 'credited',
+            'credited_at' => now(),
+        ]);
+    }
+
+    public function markAsSwept(string $sweepTxHash): bool
+    {
+        return $this->update([
+            'is_swept'      => true,
+            'sweep_tx_hash' => $sweepTxHash,
+            'status'        => 'swept',
+            'swept_at'      => now(),
+        ]);
+    }
+}

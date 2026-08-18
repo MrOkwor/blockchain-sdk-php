@@ -1,0 +1,65 @@
+{
+    "name": "blockchain-sdk/blockchain-sdk-php",
+    "description": "High-performance, multi-chain PHP & Laravel SDK for Non-Custodial Wallet Generation, Transaction Signing, Resilient RPC Routing, and Automated Token Sweeping (EVM, Bitcoin, Solana, TRON).",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Okwor Uchenna",
+            "role": "Developer"
+        }
+    ],
+    "keywords": [
+        "blockchain",
+        "crypto",
+        "ethereum",
+        "bitcoin",
+        "solana",
+        "tron",
+        "evm",
+        "bsc",
+        "polygon",
+        "web3",
+        "wallet-generator",
+        "transaction-signer",
+        "token-sweeper",
+        "laravel",
+        "php"
+    ],
+    "require": {
+        "php": "^8.2",
+        "ext-gmp": "*",
+        "ext-sodium": "*",
+        "ext-bcmath": "*",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^7.5"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "BlockchainSdk\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "BlockchainSdk\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "BlockchainSdk\\Laravel\\BlockchainServiceProvider"
+            ],
+            "aliases": {
+                "Blockchain": "BlockchainSdk\\Laravel\\Facades\\Blockchain"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

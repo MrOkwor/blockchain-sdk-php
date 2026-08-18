@@ -1,0 +1,33 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('blockchainsdk_sweeps', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('wallet_id')->nullable()->constrained('blockchainsdk_wallets')->nullOnDelete();
+            $table->string('network', 32)->index();
+            $table->string('from_address', 128);
+            $table->string('to_vault_address', 128);
+            $table->string('token_symbol', 32)->default('NATIVE');
+            $table->string('token_contract', 128)->nullable();
+            $table->decimal('amount', 24, 8);
+            $table->string('tx_hash', 128)->unique();
+            $table->decimal('fee_spent', 24, 8)->default(0);
+            $table->string('status', 32)->default('completed')->index();
+            $table->boolean('is_credited')->default(false);
+            $table->timestamp('credited_at')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('blockchainsdk_sweeps');
+    }
+};
