@@ -22,6 +22,35 @@ class Bech32
         return self::encode($hrp, $data);
     }
 
+    public static function decode(string $bech): ?array
+    {
+        $pos = strrpos($bech, '1');
+        if ($pos === false || $pos < 1 || $pos + 7 > strlen($bech) || strlen($bech) > 90) {
+            return null;
+        }
+
+        $hrp = strtolower(substr($bech, 0, $pos));
+        $data = [];
+        for ($i = $pos + 1; $i < strlen($bech); $i++) {
+            $d = strpos(self::CHARSET, strtolower($bech[$i]));
+            if ($d === false) {
+                return null;
+            }
+            $data[] = $d;
+        }
+
+        if (!self::verifyChecksum($hrp, $data)) {
+            return null;
+        }
+
+        return [$hrp, array_slice($data, 0, count($data) - 6)];
+    }
+
+    private static function verifyChecksum(string $hrp, array $data): bool
+    {
+        return self::polymod(array_merge(self::hrpExpand($hrp), $data)) === 1;
+    }
+
     private static function polymod(array $values): int
     {
         $chk = 1;

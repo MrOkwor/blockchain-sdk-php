@@ -143,4 +143,26 @@ class BlockchainSdkTest extends TestCase
         $tronGas = $this->sdk->driver('tron')->estimateTokenTransferGasCost();
         $this->assertEquals('15000000', $tronGas);
     }
+
+    public function test_address_validation_across_chains(): void
+    {
+        // EVM Addresses (valid and invalid)
+        $this->assertTrue($this->sdk->validateAddress('ethereum', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
+        $this->assertTrue($this->sdk->validateAddress('bsc', '0x55d398326f99059ff775485246999027b3197955'));
+        $this->assertFalse($this->sdk->validateAddress('ethereum', '0xInvalidAddress123'));
+        $this->assertFalse($this->sdk->validateAddress('ethereum', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'));
+
+        // Solana Addresses
+        $this->assertTrue($this->sdk->validateAddress('solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'));
+        $this->assertFalse($this->sdk->validateAddress('solana', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
+
+        // TRON Addresses
+        $this->assertTrue($this->sdk->validateAddress('tron', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'));
+        $this->assertFalse($this->sdk->validateAddress('tron', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
+
+        // Bitcoin Addresses (Bech32 & Legacy)
+        $this->assertTrue($this->sdk->validateAddress('bitcoin', 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'));
+        $this->assertTrue($this->sdk->validateAddress('bitcoin', '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa'));
+        $this->assertFalse($this->sdk->validateAddress('bitcoin', 'InvalidBtcAddress'));
+    }
 }

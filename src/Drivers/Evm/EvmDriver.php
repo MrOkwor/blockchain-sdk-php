@@ -30,6 +30,22 @@ class EvmDriver implements NetworkDriverInterface
         return $this->generator->generateWallet();
     }
 
+    public function validateAddress(string $address): bool
+    {
+        if (!preg_match('/^0x[a-fA-F0-9]{40}$/', $address)) {
+            return false;
+        }
+
+        // If purely lowercase or purely uppercase, valid format
+        $sub = substr($address, 2);
+        if (strtolower($sub) === $sub || strtoupper($sub) === $sub) {
+            return true;
+        }
+
+        // If mixed-case, verify EIP-55 checksum
+        return EvmWalletGenerator::toChecksumAddress($address) === $address;
+    }
+
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance
     {
         if ($tokenContract) {

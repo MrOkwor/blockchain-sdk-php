@@ -30,6 +30,15 @@ class BlockchainManager
         return $this->drivers[$network];
     }
 
+    public function validateAddress(string $network, string $address): bool
+    {
+        try {
+            return $this->driver($network)->validateAddress($address);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
     public function getAvailableNetworks(): array
     {
         return array_keys($this->config['networks'] ?? []);

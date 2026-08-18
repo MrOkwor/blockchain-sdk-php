@@ -10,6 +10,8 @@ interface NetworkDriverInterface
 {
     public function generateWallet(): Keypair;
 
+    public function validateAddress(string $address): bool;
+
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance;
 
     public function sendTransaction(array $params): TransactionResult;

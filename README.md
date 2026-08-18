@@ -5,7 +5,7 @@
 [![PHP Version Require](https://img.shields.io/packagist/dependency-v/mrokwor/blockchain-sdk-php/php?style=flat-square)](https://php.net)
 [![License](https://img.shields.io/packagist/l/mrokwor/blockchain-sdk-php.svg?style=flat-square)](LICENSE.md)
 
-A high-performance, **zero-third-party-cryptography** blockchain SDK for PHP 8.2+ and Laravel. Generate multi-chain custodial/deposit addresses, sign transactions locally and offline, estimate network fees, query token balances, auto-fuel gas to deposit sub-wallets, track deposits with database models, and sweep customer funds into master cold vaults across **17+ supported blockchains** including **EVM (Ethereum, BNB Smart Chain, Polygon, Arbitrum, Base, Optimism, Avalanche, Fantom, Cronos, Linea, Scroll, zkSync, Celo, Mantle)**, **Solana**, **Bitcoin (Native SegWit Bech32)**, and **TRON**.
+A high-performance, **zero-third-party-cryptography** blockchain SDK for PHP 8.2+ and Laravel. Generate multi-chain custodial/deposit addresses, validate addresses with EIP-55/Base58/Bech32 checksums, sign transactions locally and offline, estimate network fees, query token balances, auto-fuel gas to deposit sub-wallets, track deposits with database models, and sweep customer funds into master cold vaults across **17+ supported blockchains** including **EVM (Ethereum, BNB Smart Chain, Polygon, Arbitrum, Base, Optimism, Avalanche, Fantom, Cronos, Linea, Scroll, zkSync, Celo, Mantle)**, **Solana**, **Bitcoin (Native SegWit Bech32)**, and **TRON**.
 
 ---
 
@@ -13,6 +13,7 @@ A high-performance, **zero-third-party-cryptography** blockchain SDK for PHP 8.2
 
 - **Zero External Cryptographic Dependencies**: Pure-PHP mathematical primitives for Secp256k1 (with GMP acceleration), EVM Keccak-256 permutation, RFC-6979 deterministic nonce generation, Base58/Base58Check, and Bech32.
 - **17+ Supported Blockchains & Standard Tokens**: Pre-configured registry of supported token contracts, decimals, and enable/disable statuses for USDT, USDC, WBTC, DAI, LINK, UNI, and more.
+- **Multi-Chain Address Validation & Laravel Rules**: Built-in address validation across all 17 chains (EVM 0x hex & EIP-55 checksums, Solana Base58 32-byte pubkeys, TRON Base58Check T-addresses with 0x41 prefix, Bitcoin Bech32/Base58) and ready-to-use Laravel `BlockchainAddress` validation rule.
 - **Automated Gas Station & Fee Sponsorship**: Solves the "empty gas tank" problem. Automatically detects if a customer sub-wallet has 0 native currency (0 BNB/TRX/ETH/SOL) and dispatches exact gas from a Master Hot Gas Wallet before executing the token sweep.
 - **Publishable Migrations & Eloquent Models**: Publish customizable database schemas and models (`BlockchainSdkWallet`, `BlockchainSdkDeposit`, `BlockchainSdkSweep`) directly into `app/Models/`.
 - **Event-Driven Value Crediting**: Dispatches lifecycle events (`DepositConfirmed`, `WalletSwept`) to give balance value to users immediately upon deposit confirmation or after vault consolidation.
@@ -98,7 +99,46 @@ php artisan migrate
 
 ---
 
-### 2. Generating Multi-Chain Deposit Wallets in Laravel
+### 2. Validating Wallet Addresses in Laravel
+
+You can validate customer receiving/payout addresses using the `Blockchain::validateAddress()` facade or the built-in Laravel Validation Rule:
+
+#### Option A: Using the `BlockchainAddress` Validation Rule in Form Requests / Controllers
+```php
+use BlockchainSdk\Laravel\Rules\BlockchainAddress;
+use Illuminate\Http\Request;
+
+public function swap(Request $request)
+{
+    $network = $request->input('destination_network'); // e.g. 'solana', 'bsc', 'tron', 'bitcoin'
+
+    $request->validate([
+        'recipient_address' => ['required', 'string', new BlockchainAddress($network)],
+    ]);
+}
+```
+
+#### Option B: Validating Directly via Facade
+```php
+use BlockchainSdk\Laravel\Facades\Blockchain;
+
+// EVM (Ethereum, BSC, Polygon, Base, Arbitrum, etc.)
+Blockchain::validateAddress('bsc', '0x55d398326f99059fF775485246999027B3197955'); // true
+Blockchain::validateAddress('ethereum', '0xInvalidAddress123');                       // false
+
+// Solana (Base58 32-byte public key)
+Blockchain::validateAddress('solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // true
+
+// TRON (Base58Check T... address)
+Blockchain::validateAddress('tron', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // true
+
+// Bitcoin (Bech32 SegWit & Base58 Legacy)
+Blockchain::validateAddress('bitcoin', 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'); // true
+```
+
+---
+
+### 3. Generating Multi-Chain Deposit Wallets in Laravel
 
 #### Option A: Using Eloquent Models (Recommended)
 Automatically creates a wallet keypair, encrypts the private key, and associates it with a user in your database:
@@ -130,7 +170,7 @@ echo $keypair->mnemonic;    // Optional HD seed phrase string or null
 
 ---
 
-### 3. Querying Balances & Checking Token Statuses in Laravel
+### 4. Querying Balances & Checking Token Statuses in Laravel
 
 ```php
 use BlockchainSdk\Laravel\Facades\Blockchain;
@@ -156,7 +196,7 @@ echo "SOL Balance: " . $nativeBalance->balanceFormatted;
 
 ---
 
-### 4. Sweeping Sub-Wallets into Master Vaults in Laravel
+### 5. Sweeping Sub-Wallets into Master Vaults in Laravel
 
 #### A. Sweeping Native Currency via Facade
 ```php
@@ -207,7 +247,7 @@ $result = $driver->sweepTokenWithGasSponsorship(
 
 ---
 
-### 5. Giving Value to Users After Sweeping or Depositing in Laravel
+### 6. Giving Value to Users After Sweeping or Depositing in Laravel
 
 In crypto platforms and fintech applications, **"giving value"** means crediting the customer's account balance, ledger, or wallet in your application database. The SDK dispatches events so you can execute your own custom credit logic.
 
@@ -286,7 +326,7 @@ class CreditUserOnDepositListener
 
 ---
 
-### 6. Laravel Artisan Commands Reference
+### 7. Laravel Artisan Commands Reference
 
 | Command | Description | Options |
 | :--- | :--- | :--- |
@@ -375,7 +415,25 @@ $blockchain = new BlockchainManager([
 
 ---
 
-### 2. Generating Wallets in Vanilla PHP
+### 2. Validating Addresses in Vanilla PHP
+
+```php
+// Validate EVM address
+$isValidEth = $blockchain->driver('ethereum')->validateAddress('0xdAC17F958D2ee523a2206206994597C13D831ec7'); // true
+
+// Validate Solana address
+$isValidSol = $blockchain->driver('solana')->validateAddress('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'); // true
+
+// Validate TRON address
+$isValidTron = $blockchain->driver('tron')->validateAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // true
+
+// Or using the manager shortcut
+$isValidBtc = $blockchain->validateAddress('bitcoin', 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'); // true
+```
+
+---
+
+### 3. Generating Wallets in Vanilla PHP
 
 ```php
 // Generate a Solana keypair
@@ -399,7 +457,7 @@ echo "TRON Address: " . $tronKeypair->address . "\n";
 
 ---
 
-### 3. Querying Balances & Checking Tokens in Vanilla PHP
+### 4. Querying Balances & Checking Tokens in Vanilla PHP
 
 ```php
 // 1. Query Native Balance
@@ -422,7 +480,7 @@ if ($token && $blockchain->isTokenEnabled('bsc', 'USDT')) {
 
 ---
 
-### 4. Sweeping Sub-Wallets & Sponsoring Gas in Vanilla PHP
+### 5. Sweeping Sub-Wallets & Sponsoring Gas in Vanilla PHP
 
 ```php
 // Sweeping Native Currency
@@ -474,7 +532,7 @@ Run the package test suite with PHPUnit:
 composer test
 
 # Within Laravel
-php artisan test vendor/mrokwor/blockchain-sdk-php/tests/BlockchainSdkTest.php
+php artisan test vendor/blockchain-sdk/blockchain-sdk-php/tests/BlockchainSdkTest.php
 ```
 
 ### Security Best Practices

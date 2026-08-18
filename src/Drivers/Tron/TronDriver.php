@@ -31,6 +31,20 @@ class TronDriver implements NetworkDriverInterface
         return $this->generator->generateWallet();
     }
 
+    public function validateAddress(string $address): bool
+    {
+        if (!preg_match('/^T[1-9A-HJ-NP-Za-km-z]{33}$/', $address)) {
+            return false;
+        }
+
+        try {
+            $decoded = Base58::decodeCheck($address);
+            return strlen($decoded) === 21 && ord($decoded[0]) === 0x41;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance
     {
         if ($tokenContract) {

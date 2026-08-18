@@ -3,6 +3,8 @@
 namespace BlockchainSdk\Drivers\Bitcoin;
 
 use BlockchainSdk\Contracts\NetworkDriverInterface;
+use BlockchainSdk\Crypto\Base58;
+use BlockchainSdk\Crypto\Bech32;
 use BlockchainSdk\DTOs\Keypair;
 use BlockchainSdk\DTOs\TokenBalance;
 use BlockchainSdk\DTOs\TransactionResult;
@@ -24,6 +26,31 @@ class BitcoinDriver implements NetworkDriverInterface
     public function generateWallet(): Keypair
     {
         return $this->generator->generateWallet();
+    }
+
+    public function validateAddress(string $address): bool
+    {
+        // 1. Native SegWit (Bech32/Bech32m, e.g. bc1q... or bc1p...)
+        if (str_starts_with($address, 'bc1') || str_starts_with($address, 'tb1')) {
+            try {
+                $decoded = Bech32::decode($address);
+                return $decoded !== null && in_array($decoded[0], ['bc', 'tb']);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        // 2. Legacy / P2SH (Base58Check, e.g. 1... or 3...)
+        if (preg_match('/^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/', $address)) {
+            try {
+                $decoded = Base58::decodeCheck($address);
+                return strlen($decoded) === 21;
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance

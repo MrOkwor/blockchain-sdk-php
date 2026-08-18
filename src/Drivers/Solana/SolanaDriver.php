@@ -3,6 +3,7 @@
 namespace BlockchainSdk\Drivers\Solana;
 
 use BlockchainSdk\Contracts\NetworkDriverInterface;
+use BlockchainSdk\Crypto\Base58;
 use BlockchainSdk\DTOs\Keypair;
 use BlockchainSdk\DTOs\TokenBalance;
 use BlockchainSdk\DTOs\TransactionResult;
@@ -24,6 +25,20 @@ class SolanaDriver implements NetworkDriverInterface
     public function generateWallet(): Keypair
     {
         return $this->generator->generateWallet();
+    }
+
+    public function validateAddress(string $address): bool
+    {
+        if (!preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $address)) {
+            return false;
+        }
+
+        try {
+            $bytes = Base58::decode($address);
+            return strlen($bytes) === 32;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance
