@@ -1,5 +1,5 @@
 {
-    "name": "blockchain-sdk/blockchain-sdk-php",
+    "name": "mrokwor/blockchain-sdk-php",
     "description": "High-performance, multi-chain PHP & Laravel SDK for Non-Custodial Wallet Generation, Transaction Signing, Resilient RPC Routing, and Automated Token Sweeping (EVM, Bitcoin, Solana, TRON).",
     "type": "library",
     "license": "MIT",
