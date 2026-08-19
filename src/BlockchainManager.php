@@ -44,10 +44,27 @@ class BlockchainManager
         return $this->config['master_wallets'][strtolower($network)] ?? null;
     }
 
+    public function getMasterGasAddress(string $network): ?string
+    {
+        $network = strtolower($network);
+        return $this->config['master_gas_wallets'][$network]['address'] ?? null;
+    }
+
     public function getMasterGasKey(string $network): ?string
     {
-        $key = $this->config['master_gas_keys'][strtolower($network)] ?? null;
-        return self::decryptSecret($key);
+        $network = strtolower($network);
+        
+        // 1. Check nested master_gas_wallets config (new format)
+        if (isset($this->config['master_gas_wallets'][$network]['private_key'])) {
+            return self::decryptSecret($this->config['master_gas_wallets'][$network]['private_key']);
+        }
+
+        // 2. Check flat master_gas_keys config (legacy format fallback)
+        if (isset($this->config['master_gas_keys'][$network])) {
+            return self::decryptSecret($this->config['master_gas_keys'][$network]);
+        }
+
+        return null;
     }
 
     public static function decryptSecret(?string $value): ?string

@@ -63,7 +63,7 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "suggest": {
-        "illuminate/support": "Required to use the Laravel Service Provider & Facades (^10.0 || ^11.0 || ^12.0).",
-        "illuminate/database": "Required to use the Laravel Eloquent models & migrations (^10.0 || ^11.0 || ^12.0)."
+        "illuminate/support": "Required to use the Laravel Service Provider & Facades (^10.0 || ^11.0 || ^12.0 || ^13.0).",
+        "illuminate/database": "Required to use the Laravel Eloquent models & migrations (^10.0 || ^11.0 || ^12.0 || ^13.0)."
     }
 }

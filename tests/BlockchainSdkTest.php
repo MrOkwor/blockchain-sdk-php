@@ -22,8 +22,11 @@ class BlockchainSdkTest extends TestCase
                 'ethereum' => '0x71C8360f3a104d31a4570b9A821929342939b422',
                 'bsc'      => '0x55d398326f99059fF775485246999027B3197955',
             ],
-            'master_gas_keys' => [
-                'ethereum' => '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', // Plaintext
+            'master_gas_wallets' => [
+                'ethereum' => [
+                    'address'     => '0x71C8360f3a104d31a4570b9A821929342939b422',
+                    'private_key' => '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', // Plaintext
+                ],
             ],
             'networks' => [
                 'ethereum' => [
@@ -181,8 +184,9 @@ class BlockchainSdkTest extends TestCase
         $this->assertNotEquals($plain, $encrypted);
         $this->assertEquals($plain, BlockchainManager::decryptSecret($encrypted));
 
-        // 3. Manager master gas key & master wallet lookups
+        // 3. Manager master gas key, gas address & master wallet lookups
         $this->assertEquals('0x71C8360f3a104d31a4570b9A821929342939b422', $this->sdk->getMasterWallet('ethereum'));
+        $this->assertEquals('0x71C8360f3a104d31a4570b9A821929342939b422', $this->sdk->getMasterGasAddress('ethereum'));
         $this->assertEquals('0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', $this->sdk->getMasterGasKey('ethereum'));
     }
 }

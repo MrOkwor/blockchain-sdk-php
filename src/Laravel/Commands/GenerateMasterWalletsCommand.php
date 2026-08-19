@@ -12,9 +12,9 @@ class GenerateMasterWalletsCommand extends Command
                             {network? : Optional target blockchain network (ethereum, bsc, polygon, solana, tron, bitcoin, etc.)}
                             {--no-encrypt : Store raw plaintext private keys instead of encrypting}
                             {--no-store : Output credentials to console without writing to .env}
-                            {--force : Overwrite existing master wallet keys in .env}';
+                            {--force : Overwrite existing master and gas wallet keys in .env}';
 
-    protected $description = 'Generate master cold vault receiving addresses and hot gas station private keys, with automatic encryption and .env storage';
+    protected $description = 'Generate master cold vault receiving addresses and hot gas station credentials, with separate .env blocks and automated encryption';
 
     public function handle(): int
     {
@@ -37,13 +37,14 @@ class GenerateMasterWalletsCommand extends Command
         }
 
         $this->info("=== Blockchain SDK Master & Gas Wallet Generator ===");
-        $this->line("Mode: <fg=yellow>" . ($shouldEncrypt ? 'Encrypted (AES-256-CBC/GCM)' : 'Plaintext') . "</>");
+        $this->line("Mode: <fg=yellow>" . ($shouldEncrypt ? 'Encrypted (AES-256)' : 'Plaintext') . "</>");
         $this->line("Storage: <fg=yellow>" . ($shouldStore ? '.env file' : 'Console output only') . "</>\n");
 
-        $envFile = base_path('.env');
-        $envContent = ($shouldStore && file_exists($envFile)) ? file_get_contents($envFile) : '';
-        $envUpdates = [];
-        $rows = [];
+        $masterRows = [];
+        $gasRows = [];
+
+        $masterEnvUpdates = [];
+        $gasEnvUpdates = [];
 
         foreach ($networks as $network) {
             $keypair = Blockchain::driver($network)->generateWallet();
@@ -52,32 +53,80 @@ class GenerateMasterWalletsCommand extends Command
 
             $storedPrivKey = $shouldEncrypt ? Crypt::encryptString($rawPrivKey) : $rawPrivKey;
 
-            $addressEnvKey = 'BLOCKCHAIN_MASTER_' . strtoupper($network);
-            $gasEnvKey     = 'BLOCKCHAIN_GAS_KEY_' . strtoupper($network);
-
-            $rows[] = [
+            // 1. Master Cold Vault block
+            $masterKey = 'BLOCKCHAIN_MASTER_' . strtoupper($network);
+            $masterRows[] = [
                 ucfirst($network),
                 $address,
-                $shouldEncrypt ? (substr($storedPrivKey, 0, 18) . '...[ENCRYPTED]') : (substr($rawPrivKey, 0, 10) . '...'),
             ];
+            $masterEnvUpdates[$masterKey] = $address;
 
-            if ($shouldStore) {
-                $envUpdates[$addressEnvKey] = $address;
-                $envUpdates[$gasEnvKey]     = $storedPrivKey;
+            // 2. Hot Gas Station block (Bitcoin does not require separate gas sponsor key)
+            if ($network !== 'bitcoin') {
+                $gasAddressKey = 'BLOCKCHAIN_GAS_ADDRESS_' . strtoupper($network);
+                $gasKey        = 'BLOCKCHAIN_GAS_KEY_' . strtoupper($network);
+
+                $gasRows[] = [
+                    ucfirst($network),
+                    $address,
+                    $shouldEncrypt ? (substr($storedPrivKey, 0, 18) . '...[ENCRYPTED]') : (substr($rawPrivKey, 0, 10) . '...'),
+                ];
+
+                $gasEnvUpdates[$gasAddressKey] = $address;
+                $gasEnvUpdates[$gasKey]        = $storedPrivKey;
             }
         }
 
-        $this->table(['Network', 'Master Receiving Address', 'Gas Station Private Key'], $rows);
+        $this->comment("--- Master Cold Vault Receiving Addresses ---");
+        $this->table(['Network', 'Master Cold Vault Address'], $masterRows);
+
+        $this->comment("--- Hot Gas Station Wallets & Private Keys ---");
+        $this->table(['Network', 'Gas Station Address', 'Gas Private Key'], $gasRows);
 
         if ($shouldStore) {
+            $envFile = base_path('.env');
             if (!file_exists($envFile)) {
                 $this->warn("No .env file found at {$envFile}. Skipped saving.");
                 return self::SUCCESS;
             }
 
+            $envContent = file_get_contents($envFile);
+
+            $masterBlock = "\n# ==============================================================================\n" .
+                           "# BLOCKCHAIN SDK: MASTER COLD VAULT RECEIVING WALLETS\n" .
+                           "# Destination addresses where customer sub-wallet funds are swept and stored.\n" .
+                           "# ==============================================================================";
+
+            $gasBlock = "\n# ==============================================================================\n" .
+                        "# BLOCKCHAIN SDK: HOT GAS STATION WALLETS & PRIVATE KEYS\n" .
+                        "# Wallets used solely to sponsor and fuel gas fees into sub-wallets before sweeps.\n" .
+                        "# ==============================================================================";
+
             $modified = false;
-            foreach ($envUpdates as $key => $value) {
-                // If key already exists in .env
+
+            // Append Master Block Header if missing
+            if (!str_contains($envContent, 'BLOCKCHAIN SDK: MASTER COLD VAULT RECEIVING WALLETS')) {
+                $envContent .= $masterBlock;
+            }
+
+            foreach ($masterEnvUpdates as $key => $value) {
+                if (preg_match("/^{$key}=.*/m", $envContent)) {
+                    if ($force) {
+                        $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$value}\"", $envContent);
+                        $modified = true;
+                    }
+                } else {
+                    $envContent .= "\n{$key}=\"{$value}\"";
+                    $modified = true;
+                }
+            }
+
+            // Append Gas Block Header if missing
+            if (!str_contains($envContent, 'BLOCKCHAIN SDK: HOT GAS STATION WALLETS & PRIVATE KEYS')) {
+                $envContent .= $gasBlock;
+            }
+
+            foreach ($gasEnvUpdates as $key => $value) {
                 if (preg_match("/^{$key}=.*/m", $envContent)) {
                     if ($force) {
                         $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$value}\"", $envContent);
@@ -91,13 +140,13 @@ class GenerateMasterWalletsCommand extends Command
 
             if ($modified) {
                 file_put_contents($envFile, $envContent);
-                $this->info("Successfully saved master and gas wallet credentials to .env file!");
+                $this->info("Successfully saved separate Master Vault and Hot Gas Station blocks to .env file!");
             } else {
-                $this->comment("Master keys already exist in .env. Use --force to overwrite.");
+                $this->comment("Keys already exist in .env. Use --force to overwrite.");
             }
         }
 
-        $this->line("\n<fg=cyan>Note:</> The generated master addresses serve as both your receiving Vault and Hot Gas Station.");
+        $this->line("\n<fg=cyan>Tip:</> You can safely edit the Master Vault address in .env anytime (e.g. pointing to a Hardware Ledger or Gnosis Safe) without affecting the Hot Gas Station wallet.");
         return self::SUCCESS;
     }
 }
