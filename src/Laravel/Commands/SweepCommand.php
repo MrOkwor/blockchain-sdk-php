@@ -27,18 +27,18 @@ class SweepCommand extends Command
 
         $this->info("Initializing automated sweep for network [{$network}]...");
 
-        $masterVault = config("blockchainsdk.master_wallets.{$network}");
+        $masterVault = Blockchain::getMasterWallet($network);
         if (!$masterVault) {
-            $this->error("No master vault wallet configured for network [{$network}]. Set BLOCKCHAIN_MASTER_" . strtoupper($network) . " in .env");
+            $this->error("No master vault wallet configured for network [{$network}]. Set BLOCKCHAIN_MASTER_" . strtoupper($network) . " in .env or run: php artisan blockchainsdk:generate-master-wallets {$network}");
             return self::FAILURE;
         }
 
         if ($shouldSponsor) {
-            $gasKey = config("blockchainsdk.master_gas_keys.{$network}");
+            $gasKey = Blockchain::getMasterGasKey($network);
             if (!$gasKey) {
-                $this->warn("Automated gas sponsorship requested (--sponsor), but no BLOCKCHAIN_GAS_KEY_" . strtoupper($network) . " is set in .env.");
+                $this->warn("Automated gas sponsorship requested (--sponsor), but no BLOCKCHAIN_GAS_KEY_" . strtoupper($network) . " is configured.");
             } else {
-                $this->line("Gas Station: <fg=green>Active (Master Hot Gas Key Configured)</>");
+                $this->line("Gas Station: <fg=green>Active (Master Hot Gas Key Ready / Auto-Decrypted)</>");
             }
         }
 

@@ -39,6 +39,36 @@ class BlockchainManager
         }
     }
 
+    public function getMasterWallet(string $network): ?string
+    {
+        return $this->config['master_wallets'][strtolower($network)] ?? null;
+    }
+
+    public function getMasterGasKey(string $network): ?string
+    {
+        $key = $this->config['master_gas_keys'][strtolower($network)] ?? null;
+        return self::decryptSecret($key);
+    }
+
+    public static function decryptSecret(?string $value): ?string
+    {
+        if (empty($value)) {
+            return null;
+        }
+
+        // If Laravel Crypt facade is available, attempt safe decryption
+        if (class_exists(\Illuminate\Support\Facades\Crypt::class)) {
+            try {
+                return \Illuminate\Support\Facades\Crypt::decryptString($value);
+            } catch (\Throwable $e) {
+                // Not encrypted or already plaintext
+                return $value;
+            }
+        }
+
+        return $value;
+    }
+
     public function getAvailableNetworks(): array
     {
         return array_keys($this->config['networks'] ?? []);

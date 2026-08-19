@@ -6,6 +6,7 @@ use BlockchainSdk\BlockchainManager;
 use BlockchainSdk\Drivers\Bitcoin\BitcoinTransactionSigner;
 use BlockchainSdk\Drivers\Evm\EvmTransactionSigner;
 use BlockchainSdk\Drivers\Solana\SolanaTransactionSigner;
+use Illuminate\Support\Facades\Crypt;
 use Tests\TestCase;
 
 class BlockchainSdkTest extends TestCase
@@ -17,6 +18,13 @@ class BlockchainSdkTest extends TestCase
         parent::setUp();
         $this->sdk = new BlockchainManager([
             'default' => 'ethereum',
+            'master_wallets' => [
+                'ethereum' => '0x71C8360f3a104d31a4570b9A821929342939b422',
+                'bsc'      => '0x55d398326f99059fF775485246999027B3197955',
+            ],
+            'master_gas_keys' => [
+                'ethereum' => '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', // Plaintext
+            ],
             'networks' => [
                 'ethereum' => [
                     'chain_id' => 1,
@@ -146,23 +154,35 @@ class BlockchainSdkTest extends TestCase
 
     public function test_address_validation_across_chains(): void
     {
-        // EVM Addresses (valid and invalid)
         $this->assertTrue($this->sdk->validateAddress('ethereum', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
         $this->assertTrue($this->sdk->validateAddress('bsc', '0x55d398326f99059ff775485246999027b3197955'));
         $this->assertFalse($this->sdk->validateAddress('ethereum', '0xInvalidAddress123'));
         $this->assertFalse($this->sdk->validateAddress('ethereum', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'));
 
-        // Solana Addresses
         $this->assertTrue($this->sdk->validateAddress('solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'));
         $this->assertFalse($this->sdk->validateAddress('solana', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
 
-        // TRON Addresses
         $this->assertTrue($this->sdk->validateAddress('tron', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'));
         $this->assertFalse($this->sdk->validateAddress('tron', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
 
-        // Bitcoin Addresses (Bech32 & Legacy)
         $this->assertTrue($this->sdk->validateAddress('bitcoin', 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'));
         $this->assertTrue($this->sdk->validateAddress('bitcoin', '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa'));
         $this->assertFalse($this->sdk->validateAddress('bitcoin', 'InvalidBtcAddress'));
+    }
+
+    public function test_safe_secret_decryption_and_master_wallet_lookup(): void
+    {
+        // 1. Plaintext secret decryption
+        $plain = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
+        $this->assertEquals($plain, BlockchainManager::decryptSecret($plain));
+
+        // 2. Encrypted secret decryption (using Laravel Crypt)
+        $encrypted = Crypt::encryptString($plain);
+        $this->assertNotEquals($plain, $encrypted);
+        $this->assertEquals($plain, BlockchainManager::decryptSecret($encrypted));
+
+        // 3. Manager master gas key & master wallet lookups
+        $this->assertEquals('0x71C8360f3a104d31a4570b9A821929342939b422', $this->sdk->getMasterWallet('ethereum'));
+        $this->assertEquals('0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', $this->sdk->getMasterGasKey('ethereum'));
     }
 }

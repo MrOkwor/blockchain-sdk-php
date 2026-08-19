@@ -3,6 +3,7 @@
 namespace BlockchainSdk\Laravel;
 
 use BlockchainSdk\BlockchainManager;
+use BlockchainSdk\Laravel\Commands\GenerateMasterWalletsCommand;
 use BlockchainSdk\Laravel\Commands\MonitorCommand;
 use BlockchainSdk\Laravel\Commands\SweepCommand;
 use Illuminate\Support\ServiceProvider;
@@ -47,6 +48,7 @@ class BlockchainServiceProvider extends ServiceProvider
 
             // Register Artisan Commands
             $this->commands([
+                GenerateMasterWalletsCommand::class,
                 SweepCommand::class,
                 MonitorCommand::class,
             ]);

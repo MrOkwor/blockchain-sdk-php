@@ -14,12 +14,13 @@ A high-performance, **zero-third-party-cryptography** blockchain SDK for PHP 8.2
 - **Zero External Cryptographic Dependencies**: Pure-PHP mathematical primitives for Secp256k1 (with GMP acceleration), EVM Keccak-256 permutation, RFC-6979 deterministic nonce generation, Base58/Base58Check, and Bech32.
 - **17+ Supported Blockchains & Standard Tokens**: Pre-configured registry of supported token contracts, decimals, and enable/disable statuses for USDT, USDC, WBTC, DAI, LINK, UNI, and more.
 - **Multi-Chain Address Validation & Laravel Rules**: Built-in address validation across all 17 chains (EVM 0x hex & EIP-55 checksums, Solana Base58 32-byte pubkeys, TRON Base58Check T-addresses with 0x41 prefix, Bitcoin Bech32/Base58) and ready-to-use Laravel `BlockchainAddress` validation rule.
+- **Automated Gas Station & Master Vault Generator**: Generate master receiving vaults and hot gas station private keys in one command (`php artisan blockchainsdk:generate-master-wallets`) with automated AES-256 encryption and `.env` storage.
 - **Automated Gas Station & Fee Sponsorship**: Solves the "empty gas tank" problem. Automatically detects if a customer sub-wallet has 0 native currency (0 BNB/TRX/ETH/SOL) and dispatches exact gas from a Master Hot Gas Wallet before executing the token sweep.
 - **Publishable Migrations & Eloquent Models**: Publish customizable database schemas and models (`BlockchainSdkWallet`, `BlockchainSdkDeposit`, `BlockchainSdkSweep`) directly into `app/Models/`.
 - **Event-Driven Value Crediting**: Dispatches lifecycle events (`DepositConfirmed`, `WalletSwept`) to give balance value to users immediately upon deposit confirmation or after vault consolidation.
 - **Multi-Node Failover RPC Client**: Built-in round-robin health-checking and automatic failover across multiple fallback RPC endpoints.
 - **Automated Vault Sweeper**: Compute network fees and automatically sweep funds from customer deposit addresses into master cold vaults.
-- **Full Laravel 10/11/12 Support**: First-class Service Provider, Facade (`Blockchain::driver(...)`), publishable `config/blockchainsdk.php`, and ready-to-use Artisan commands (`blockchainsdk:sweep`, `blockchainsdk:monitor`).
+- **Full Laravel 10/11/12 Support**: First-class Service Provider, Facade (`Blockchain::driver(...)`), publishable `config/blockchainsdk.php`, and ready-to-use Artisan commands (`blockchainsdk:generate-master-wallets`, `blockchainsdk:sweep`, `blockchainsdk:monitor`).
 - **Offline & Secure Signing**: Private keys never leave your application server; transactions are constructed and signed locally before raw broadcast.
 
 ---
@@ -99,7 +100,53 @@ php artisan migrate
 
 ---
 
-### 2. Validating Wallet Addresses in Laravel
+### 2. Generating Master Vaults & Hot Gas Wallets
+
+To sweep customer deposits into a central vault or sponsor network fees for dry sub-wallets, your platform needs Master Receiving Addresses and Hot Gas Station keys. 
+
+You can generate all master vault credentials in a single command with **automatic AES-256 encryption** and **direct `.env` storage**:
+
+```bash
+# Generate for all 17 supported blockchains (Encrypted & Saved to .env)
+php artisan blockchainsdk:generate-master-wallets
+
+# Generate for a specific blockchain network (e.g. BSC, Polygon, Solana, TRON)
+php artisan blockchainsdk:generate-master-wallets bsc
+php artisan blockchainsdk:generate-master-wallets solana
+php artisan blockchainsdk:generate-master-wallets tron
+
+# Overwrite existing keys in .env
+php artisan blockchainsdk:generate-master-wallets --force
+
+# Console output only (do not write to .env)
+php artisan blockchainsdk:generate-master-wallets --no-store
+
+# Store raw plaintext private keys (disable encryption)
+php artisan blockchainsdk:generate-master-wallets --no-encrypt
+```
+
+#### How Master Keys Are Stored in `.env`
+```env
+# Generated Master Receiving Vaults
+BLOCKCHAIN_MASTER_ETHEREUM="0x71C8360f3a104d31a4570b9A821929342939b422"
+BLOCKCHAIN_MASTER_BSC="0x55d398326f99059fF775485246999027B3197955"
+BLOCKCHAIN_MASTER_SOLANA="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+BLOCKCHAIN_MASTER_TRON="TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+BLOCKCHAIN_MASTER_BITCOIN="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+
+# Generated Hot Gas Station Keys (Encrypted with Laravel's APP_KEY)
+BLOCKCHAIN_GAS_KEY_ETHEREUM="eyJpdiI6Inl1Vn...[ENCRYPTED_SECRET]..."
+BLOCKCHAIN_GAS_KEY_BSC="eyJpdiI6Inl1Vn...[ENCRYPTED_SECRET]..."
+BLOCKCHAIN_GAS_KEY_SOLANA="eyJpdiI6Inl1Vn...[ENCRYPTED_SECRET]..."
+BLOCKCHAIN_GAS_KEY_TRON="eyJpdiI6Inl1Vn...[ENCRYPTED_SECRET]..."
+```
+
+> [!TIP]
+> **Transparent Auto-Decryption**: The SDK automatically detects whether a gas key in `.env` or `config/blockchainsdk.php` is encrypted (`eyJpdiI...`) or plain hex. It decrypts it seamlessly on-the-fly during sweeps and fee sponsorships without any manual decryption calls.
+
+---
+
+### 3. Validating Wallet Addresses in Laravel
 
 You can validate customer receiving/payout addresses using the `Blockchain::validateAddress()` facade or the built-in Laravel Validation Rule:
 
@@ -138,7 +185,7 @@ Blockchain::validateAddress('bitcoin', 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3
 
 ---
 
-### 3. Generating Multi-Chain Deposit Wallets in Laravel
+### 4. Generating Multi-Chain Deposit Wallets in Laravel
 
 #### Option A: Using Eloquent Models (Recommended)
 Automatically creates a wallet keypair, encrypts the private key, and associates it with a user in your database:
@@ -170,7 +217,7 @@ echo $keypair->mnemonic;    // Optional HD seed phrase string or null
 
 ---
 
-### 4. Querying Balances & Checking Token Statuses in Laravel
+### 5. Querying Balances & Checking Token Statuses in Laravel
 
 ```php
 use BlockchainSdk\Laravel\Facades\Blockchain;
@@ -196,14 +243,14 @@ echo "SOL Balance: " . $nativeBalance->balanceFormatted;
 
 ---
 
-### 5. Sweeping Sub-Wallets into Master Vaults in Laravel
+### 6. Sweeping Sub-Wallets into Master Vaults in Laravel
 
 #### A. Sweeping Native Currency via Facade
 ```php
 use BlockchainSdk\Laravel\Facades\Blockchain;
 
 $driver = Blockchain::driver('ethereum');
-$masterVault = config('blockchainsdk.master_wallets.ethereum');
+$masterVault = Blockchain::getMasterWallet('ethereum');
 
 $result = $driver->sweep(
     fromPrivateKey: $subWalletPrivateKey,
@@ -220,7 +267,7 @@ if ($result->success) {
 use BlockchainSdk\Laravel\Facades\Blockchain;
 
 $driver = Blockchain::driver('bsc');
-$masterVault = config('blockchainsdk.master_wallets.bsc');
+$masterVault = Blockchain::getMasterWallet('bsc');
 $token = Blockchain::findToken('bsc', 'USDT');
 
 $result = $driver->sweep(
@@ -239,15 +286,15 @@ $driver = Blockchain::driver('polygon');
 // Automatically fuels exact MATIC/POL gas from master gas station -> sweeps USDT
 $result = $driver->sweepTokenWithGasSponsorship(
     subWalletPrivateKey: $subWalletPrivateKey,
-    masterGasPrivateKey: config('blockchainsdk.master_gas_keys.polygon'),
-    toVaultAddress:      config('blockchainsdk.master_wallets.polygon'),
+    masterGasPrivateKey: Blockchain::getMasterGasKey('polygon'),
+    toVaultAddress:      Blockchain::getMasterWallet('polygon'),
     tokenContract:       '0xc2132D05D31c914a87C6611C10748AEb04B58e8F' // USDT
 );
 ```
 
 ---
 
-### 6. Giving Value to Users After Sweeping or Depositing in Laravel
+### 7. Giving Value to Users After Sweeping or Depositing in Laravel
 
 In crypto platforms and fintech applications, **"giving value"** means crediting the customer's account balance, ledger, or wallet in your application database. The SDK dispatches events so you can execute your own custom credit logic.
 
@@ -326,10 +373,11 @@ class CreditUserOnDepositListener
 
 ---
 
-### 7. Laravel Artisan Commands Reference
+### 8. Laravel Artisan Commands Reference
 
 | Command | Description | Options |
 | :--- | :--- | :--- |
+| `php artisan blockchainsdk:generate-master-wallets {network?}` | Generates master receiving vaults and hot gas keys with AES-256 encryption and `.env` storage | `--no-encrypt`, `--no-store`, `--force` |
 | `php artisan blockchainsdk:sweep {network?}` | Sweeps sub-wallets into central cold vault | `--token=` (symbol/contract), `--sponsor` (auto-gas), `--credit` (dispatch value event) |
 | `php artisan blockchainsdk:monitor` | Multi-chain background deposit confirmation listener | `--network=` (filter network), `--once` (run single pass) |
 | `php artisan vendor:publish --tag="blockchainsdk-config"` | Publishes `config/blockchainsdk.php` | `--force` (overwrite existing) |
