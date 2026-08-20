@@ -7,6 +7,20 @@
 
 A high-performance, **zero-third-party-cryptography** blockchain SDK for PHP 8.2+ and Laravel (10, 11, 12, and 13). Generate multi-chain custodial/deposit addresses, validate addresses with EIP-55/Base58/Bech32 checksums, sign transactions locally and offline, estimate network fees, query token balances, auto-fuel gas to deposit sub-wallets, track deposits with database models, and sweep customer funds into master cold vaults across **17+ supported blockchains** including **EVM (Ethereum, BNB Smart Chain, Polygon, Arbitrum, Base, Optimism, Avalanche, Fantom, Cronos, Linea, Scroll, zkSync, Celo, Mantle)**, **Solana**, **Bitcoin (Native SegWit Bech32)**, and **TRON**.
 
+> 💡 **Looking for working examples?** Check out the official **[blockchain-sdk-php-examples](https://github.com/MrOkwor/blockchain-sdk-php-examples)** repository for a complete runnable Laravel application featuring multi-chain wallet generation, deposit monitoring, transaction explorer discovery, and automated gas-sponsored token sweeps.
+
+---
+
+## 📚 Examples & Demo Application
+
+We maintain a complete, ready-to-run demo application in the **[MrOkwor/blockchain-sdk-php-examples](https://github.com/MrOkwor/blockchain-sdk-php-examples)** repository. It includes:
+
+- **Interactive Wallet Generator**: Generate and inspect multi-chain keypairs across EVM, Solana, TRON, and Bitcoin.
+- **Address Validation Playground**: Validate customer addresses with instant EIP-55, Base58, and Bech32 checksum verification.
+- **Live Deposit Monitoring**: Real-time balance and incoming transaction detection across 17+ chains.
+- **Automated Gas Station Sweeper**: Test end-to-end token sweeps with automatic native gas fueling on dry deposit addresses.
+- **Production Controllers & Blade Views**: Copy-pasteable real-world Laravel controllers, models, and background artisan worker setups.
+
 ---
 
 ## Features
