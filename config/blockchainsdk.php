@@ -121,6 +121,10 @@ return [
             'address'     => env('BLOCKCHAIN_GAS_ADDRESS_TRON'),
             'private_key' => env('BLOCKCHAIN_GAS_KEY_TRON'),
         ],
+        'bitcoin'   => [
+            'address'     => env('BLOCKCHAIN_GAS_ADDRESS_BITCOIN'),
+            'private_key' => env('BLOCKCHAIN_GAS_KEY_BITCOIN'),
+        ],
     ],
 
     /*

@@ -61,20 +61,18 @@ class GenerateMasterWalletsCommand extends Command
             ];
             $masterEnvUpdates[$masterKey] = $address;
 
-            // 2. Hot Gas Station block (Bitcoin does not require separate gas sponsor key)
-            if ($network !== 'bitcoin') {
-                $gasAddressKey = 'BLOCKCHAIN_GAS_ADDRESS_' . strtoupper($network);
-                $gasKey        = 'BLOCKCHAIN_GAS_KEY_' . strtoupper($network);
+            // 2. Hot Gas Wallet / Key block
+            $gasAddressKey = 'BLOCKCHAIN_GAS_ADDRESS_' . strtoupper($network);
+            $gasKey        = 'BLOCKCHAIN_GAS_KEY_' . strtoupper($network);
 
-                $gasRows[] = [
-                    ucfirst($network),
-                    $address,
-                    $shouldEncrypt ? (substr($storedPrivKey, 0, 18) . '...[ENCRYPTED]') : (substr($rawPrivKey, 0, 10) . '...'),
-                ];
+            $gasRows[] = [
+                ucfirst($network),
+                $address,
+                $shouldEncrypt ? (substr($storedPrivKey, 0, 18) . '...[ENCRYPTED]') : (substr($rawPrivKey, 0, 10) . '...'),
+            ];
 
-                $gasEnvUpdates[$gasAddressKey] = $address;
-                $gasEnvUpdates[$gasKey]        = $storedPrivKey;
-            }
+            $gasEnvUpdates[$gasAddressKey] = $address;
+            $gasEnvUpdates[$gasKey]        = $storedPrivKey;
         }
 
         $this->comment("--- Master Cold Vault Receiving Addresses ---");
