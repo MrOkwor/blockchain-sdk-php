@@ -87,7 +87,11 @@ class TronDriver implements NetworkDriverInterface
 
     public function sendTransaction(array $params): TransactionResult
     {
-        $from = $this->generator->privateKeyToAddress($params['from_private_key']);
+        $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
+        $from = $this->generator->privateKeyToAddress($fromPrivateKey);
+        $params['from_private_key'] = $fromPrivateKey;
+        $params['private_key'] = $fromPrivateKey;
+
         $ownerHex = bin2hex(Base58::decodeCheck($from));
         $toHex = bin2hex(Base58::decodeCheck($params['to']));
 
@@ -95,7 +99,8 @@ class TronDriver implements NetworkDriverInterface
 
         if ($tokenContract) {
             $contractHex = bin2hex(Base58::decodeCheck($tokenContract));
-            $amountSun = (string)($params['amount_raw'] ?? ($params['amount'] * 1e6));
+            $decimals = (int)($params['decimals'] ?? 6);
+            $amountSun = (string)($params['amount_raw'] ?? bcmul((string)($params['amount'] ?? '0'), bcpow('10', (string)$decimals), 0));
             $paramHex = str_pad(substr($toHex, 2), 64, '0', STR_PAD_LEFT) . str_pad(gmp_strval(gmp_init($amountSun, 10), 16), 64, '0', STR_PAD_LEFT);
 
             $txData = $this->rpc->post('wallet/triggersmartcontract', [
@@ -107,7 +112,7 @@ class TronDriver implements NetworkDriverInterface
             ]);
             $rawTx = $txData['transaction'] ?? [];
         } else {
-            $amountSun = (int)($params['amount_sun'] ?? ($params['amount'] * 1e6));
+            $amountSun = (int)($params['amount_sun'] ?? (floatval($params['amount'] ?? 0) * 1e6));
             $rawTx = $this->rpc->post('wallet/createtransaction', [
                 'owner_address' => $ownerHex,
                 'to_address' => $toHex,
@@ -120,7 +125,7 @@ class TronDriver implements NetworkDriverInterface
         }
 
         $signedJson = $this->signer->signTransaction([
-            'private_key' => $params['from_private_key'],
+            'private_key' => $fromPrivateKey,
             'raw_data_hex' => $rawTx['raw_data_hex'],
             'transaction_data' => $rawTx,
         ]);

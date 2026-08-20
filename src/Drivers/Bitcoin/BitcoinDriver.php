@@ -83,7 +83,11 @@ class BitcoinDriver implements NetworkDriverInterface
 
     public function sendTransaction(array $params): TransactionResult
     {
-        $from = $this->generator->privateKeyToAddress($params['from_private_key']);
+        $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
+        $from = $this->generator->privateKeyToAddress($fromPrivateKey);
+        $params['from_private_key'] = $fromPrivateKey;
+        $params['private_key'] = $fromPrivateKey;
+
         $utxos = $this->fetchUtxos($from);
         if (empty($utxos)) {
             return new TransactionResult(false, null, null, "No confirmed UTXOs found for address {$from}.");

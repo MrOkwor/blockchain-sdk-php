@@ -81,11 +81,13 @@ class SolanaDriver implements NetworkDriverInterface
         $blockhashRes = $this->rpc->call('getLatestBlockhash', [['commitment' => 'confirmed']]);
         $recentBlockhash = $blockhashRes['result']['value']['blockhash'] ?? '';
 
-        $fromAddress = $this->generator->privateKeyToAddress($params['from_private_key']);
+        $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
+        $fromAddress = $this->generator->privateKeyToAddress($fromPrivateKey);
+        $params['from_private_key'] = $fromPrivateKey;
+        $params['private_key'] = $fromPrivateKey;
         $params['from_address'] = $fromAddress;
         $params['to_address'] = $params['to'];
         $params['recent_blockhash'] = $recentBlockhash;
-        $params['private_key'] = $params['from_private_key'];
         $params['lamports'] = (int)($params['lamports'] ?? (floatval($params['amount'] ?? 0) * 1e9));
 
         $signedBase64 = $this->signer->signTransaction($params);

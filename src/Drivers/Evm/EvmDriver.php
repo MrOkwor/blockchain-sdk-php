@@ -64,7 +64,10 @@ class EvmDriver implements NetworkDriverInterface
 
     public function sendTransaction(array $params): TransactionResult
     {
-        $from = $this->generator->privateKeyToAddress($params['from_private_key']);
+        $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
+        $from = $this->generator->privateKeyToAddress($fromPrivateKey);
+        $params['from_private_key'] = $fromPrivateKey;
+        $params['private_key'] = $fromPrivateKey;
         
         $nonceRes = $this->rpc->call('eth_getTransactionCount', [$from, 'pending']);
         $nonce = hexdec($nonceRes['result'] ?? '0x0');
@@ -74,7 +77,23 @@ class EvmDriver implements NetworkDriverInterface
 
         $params['nonce'] = $params['nonce'] ?? $nonce;
         $params['gas_price'] = $params['gas_price'] ?? $gasPriceWei;
-        $params['gas_limit'] = $params['gas_limit'] ?? (!empty($params['data']) ? 65000 : 21000);
+
+        $tokenContract = $params['token_contract'] ?? null;
+        if ($tokenContract && empty($params['data'])) {
+            $recipient = $params['to'];
+            $decimals = (int)($params['decimals'] ?? 18);
+            $amountRaw = (string)($params['amount_raw'] ?? bcmul((string)($params['amount'] ?? '0'), bcpow('10', (string)$decimals), 0));
+            $params['to'] = $tokenContract;
+            $params['data'] = EvmTransactionSigner::buildErc20TransferData($recipient, $amountRaw);
+            $params['value'] = '0';
+            $params['gas_limit'] = $params['gas_limit'] ?? 65000;
+        } elseif (isset($params['amount']) && !isset($params['value'])) {
+            $params['value'] = bcmul((string)$params['amount'], '1000000000000000000', 0);
+            $params['gas_limit'] = $params['gas_limit'] ?? 21000;
+        } else {
+            $params['gas_limit'] = $params['gas_limit'] ?? (!empty($params['data']) ? 65000 : 21000);
+        }
+
         $params['chain_id'] = $this->chainId;
 
         $signedRaw = $this->signer->signTransaction($params);
