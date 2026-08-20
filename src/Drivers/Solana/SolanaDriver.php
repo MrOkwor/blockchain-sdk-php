@@ -78,17 +78,34 @@ class SolanaDriver implements NetworkDriverInterface
 
     public function sendTransaction(array $params): TransactionResult
     {
+        $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
+        if (empty($fromPrivateKey)) {
+            return new TransactionResult(false, null, null, "Private key is required for Solana transaction.");
+        }
+
+        $fromAddress = $this->generator->privateKeyToAddress($fromPrivateKey);
+        $params['from_private_key'] = $fromPrivateKey;
+        $params['private_key']      = $fromPrivateKey;
+        $params['from_address']     = $fromAddress;
+        $params['to_address']       = $params['to'];
+
+        // Token vs Native lamports calculation
+        if (empty($params['token_contract'])) {
+            $params['lamports'] = (int)($params['lamports'] ?? \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'] ?? '0', 9));
+        } else {
+            $decimals = (int)($params['decimals'] ?? 6);
+            $params['amount_raw'] = (string)($params['amount_raw'] ?? \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'] ?? '0', $decimals));
+        }
+
+        // Fetch and validate 32-byte blockhash from RPC
         $blockhashRes = $this->rpc->call('getLatestBlockhash', [['commitment' => 'confirmed']]);
         $recentBlockhash = $blockhashRes['result']['value']['blockhash'] ?? '';
 
-        $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
-        $fromAddress = $this->generator->privateKeyToAddress($fromPrivateKey);
-        $params['from_private_key'] = $fromPrivateKey;
-        $params['private_key'] = $fromPrivateKey;
-        $params['from_address'] = $fromAddress;
-        $params['to_address'] = $params['to'];
+        if (empty($recentBlockhash) || strlen(Base58::decode($recentBlockhash)) !== 32) {
+            return new TransactionResult(false, null, null, "Failed to retrieve valid 32-byte recentBlockhash from Solana RPC.");
+        }
+
         $params['recent_blockhash'] = $recentBlockhash;
-        $params['lamports'] = (int)($params['lamports'] ?? (floatval($params['amount'] ?? 0) * 1e9));
 
         $signedBase64 = $this->signer->signTransaction($params);
         return $this->broadcastRawTransaction($signedBase64);
@@ -173,5 +190,20 @@ class SolanaDriver implements NetworkDriverInterface
         } catch (\Throwable $e) {
             return new TransactionResult(false, null, $signedRawTx, $e->getMessage());
         }
+    }
+
+    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
+    {
+        try {
+            $res = $this->rpc->call('getSignaturesForAddress', [$address, ['limit' => 5]]);
+            $signatures = $res['result'] ?? [];
+            if (!empty($signatures[0]['signature'])) {
+                return $signatures[0]['signature'];
+            }
+        } catch (\Throwable $e) {
+            // Silently fallback
+        }
+
+        return null;
     }
 }

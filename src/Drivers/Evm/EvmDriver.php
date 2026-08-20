@@ -53,7 +53,16 @@ class EvmDriver implements NetworkDriverInterface
             $res = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => $data], 'latest']);
             $hex = $res['result'] ?? '0x0';
             $rawDec = gmp_strval(gmp_init($hex, 16), 10);
-            return new TokenBalance('TOKEN', $rawDec, bcdiv($rawDec, '1000000', 6), 6);
+
+            // Fetch token decimals dynamically (0x313ce567 = decimals())
+            $decRes = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
+            $decimals = hexdec($decRes['result'] ?? '0x12');
+            if ($decimals <= 0 || $decimals > 36) {
+                $decimals = 18;
+            }
+
+            $formatted = bcdiv($rawDec, bcpow('10', (string)$decimals), min($decimals, 8));
+            return new TokenBalance('TOKEN', $rawDec, $formatted, $decimals);
         }
 
         $res = $this->rpc->call('eth_getBalance', [$address, 'latest']);
@@ -82,16 +91,37 @@ class EvmDriver implements NetworkDriverInterface
         if ($tokenContract && empty($params['data'])) {
             $recipient = $params['to'];
             $decimals = (int)($params['decimals'] ?? 18);
-            $amountRaw = (string)($params['amount_raw'] ?? bcmul((string)($params['amount'] ?? '0'), bcpow('10', (string)$decimals), 0));
+            $amountRaw = (string)($params['amount_raw'] ?? \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'] ?? '0', $decimals));
             $params['to'] = $tokenContract;
             $params['data'] = EvmTransactionSigner::buildErc20TransferData($recipient, $amountRaw);
             $params['value'] = '0';
-            $params['gas_limit'] = $params['gas_limit'] ?? 65000;
         } elseif (isset($params['amount']) && !isset($params['value'])) {
-            $params['value'] = bcmul((string)$params['amount'], '1000000000000000000', 0);
-            $params['gas_limit'] = $params['gas_limit'] ?? 21000;
-        } else {
-            $params['gas_limit'] = $params['gas_limit'] ?? (!empty($params['data']) ? 65000 : 21000);
+            $params['value'] = \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'], 18);
+        }
+
+        // Dynamically estimate gas limit with eth_estimateGas to support smart contracts, EIP-7702, and EOAs
+        if (!isset($params['gas_limit'])) {
+            try {
+                $estimateParams = [
+                    'from'  => $from,
+                    'to'    => $params['to'],
+                    'value' => '0x' . gmp_strval(gmp_init($params['value'] ?? '0', 10), 16),
+                ];
+                if (!empty($params['data'])) {
+                    $estimateParams['data'] = $params['data'];
+                }
+                $estRes = $this->rpc->call('eth_estimateGas', [$estimateParams]);
+                $estimatedGas = hexdec($estRes['result'] ?? '0x0');
+                if ($estimatedGas > 0) {
+                    $params['gas_limit'] = max((int)($estimatedGas * 1.25), 21000);
+                }
+            } catch (\Throwable $e) {
+                // Fallback safe default
+            }
+
+            if (!isset($params['gas_limit'])) {
+                $params['gas_limit'] = !empty($params['data']) ? 65000 : 35000;
+            }
         }
 
         $params['chain_id'] = $this->chainId;
@@ -124,18 +154,31 @@ class EvmDriver implements NetworkDriverInterface
         $gasPriceRes = $this->rpc->call('eth_gasPrice', []);
         $gasPriceWei = gmp_strval(gmp_init($gasPriceRes['result'] ?? '0x4a817c800', 16), 10);
         $totalGasFee = bcmul($gasPriceWei, '21000');
+        // Add 10% safety buffer for gas price fluctuations
+        $gasFeeWithBuffer = bcadd($totalGasFee, bcdiv($totalGasFee, '10', 0));
 
-        $sweepable = bcsub($balance->balanceRaw, $totalGasFee);
+        $sweepable = bcsub($balance->balanceRaw, $gasFeeWithBuffer);
         if (bccomp($sweepable, '0') <= 0) {
             return new TransactionResult(false, null, null, "Insufficient native balance to cover transaction gas fee.");
         }
 
         return $this->sendTransaction([
             'from_private_key' => $fromPrivateKey,
-            'to' => $toAddress,
-            'value' => $sweepable,
-            'gas_limit' => 21000,
+            'to'               => $toAddress,
+            'value'            => $sweepable,
+            'gas_limit'        => 21000,
+            'gas_price'        => $gasPriceWei,
         ]);
+    }
+
+    public function getTransactionReceipt(string $txHash): ?array
+    {
+        try {
+            $res = $this->rpc->call('eth_getTransactionReceipt', [$txHash]);
+            return $res['result'] ?? null;
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function estimateTokenTransferGasCost(?string $tokenContract = null): string
@@ -199,5 +242,76 @@ class EvmDriver implements NetworkDriverInterface
         } catch (\Throwable $e) {
             return new TransactionResult(false, null, $signedRawTx, $e->getMessage());
         }
+    }
+
+    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
+    {
+        try {
+            $currentBlockHex = $this->rpc->call('eth_blockNumber', [])['result'] ?? null;
+            if (!$currentBlockHex) return null;
+            $currentBlock = hexdec($currentBlockHex);
+
+            // 1. If ERC-20 token, search Transfer logs backwards in 50-block chunks (up to 1,000 blocks back)
+            if ($tokenContract) {
+                $transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+                $paddedAddress = '0x' . str_pad(substr(strtolower($address), 2), 64, '0', STR_PAD_LEFT);
+                $chunkSize = 50;
+                $maxLookback = 1000;
+
+                for ($i = 0; $i * $chunkSize < $maxLookback; $i++) {
+                    $toBlock = $currentBlock - ($i * $chunkSize);
+                    $fromBlock = max(0, $toBlock - $chunkSize + 1);
+
+                    $res = $this->rpc->call('eth_getLogs', [[
+                        'fromBlock' => '0x' . dechex($fromBlock),
+                        'toBlock'   => '0x' . dechex($toBlock),
+                        'address'   => $tokenContract,
+                        'topics'    => [$transferTopic, null, $paddedAddress],
+                    ]]);
+
+                    $logs = $res['result'] ?? [];
+                    if (!empty($logs)) {
+                        $lastLog = end($logs);
+                        if (!empty($lastLog['transactionHash'])) {
+                            return $lastLog['transactionHash'];
+                        }
+                    }
+                }
+            }
+
+            // 2. Blockscout v2 Keyless API fallback for supported EVM chains
+            $blockscoutHosts = [
+                1      => 'eth.blockscout.com',
+                10     => 'optimism.blockscout.com',
+                56     => 'bsc.blockscout.com',
+                137    => 'polygon.blockscout.com',
+                8453   => 'base.blockscout.com',
+                42161  => 'arbitrum.blockscout.com',
+                42220  => 'celo.blockscout.com',
+                534352 => 'scroll.blockscout.com',
+            ];
+
+            if (isset($blockscoutHosts[$this->chainId])) {
+                $host = $blockscoutHosts[$this->chainId];
+                $client = new \GuzzleHttp\Client(['timeout' => 5, 'http_errors' => false]);
+                $url = "https://{$host}/api/v2/addresses/{$address}/token-transfers";
+                $res = $client->get($url);
+                if ($res->getStatusCode() === 200) {
+                    $data = json_decode($res->getBody()->getContents(), true);
+                    foreach ($data['items'] ?? [] as $item) {
+                        $to = strtolower($item['to']['hash'] ?? '');
+                        if ($to === strtolower($address)) {
+                            if (!$tokenContract || strtolower($item['token']['address'] ?? '') === strtolower($tokenContract)) {
+                                return $item['transaction_hash'] ?? null;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // Silently fallback
+        }
+
+        return null;
     }
 }

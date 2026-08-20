@@ -254,6 +254,38 @@ echo "SOL Balance: " . $nativeBalance->balanceFormatted;
 
 ---
 
+### 5.5 Discovering Incoming Deposit Transaction Hashes
+
+When customers deposit funds into temporary sub-wallets or personal addresses, you can automatically capture the incoming blockchain transaction hash across EVM, Solana, TRON, and Bitcoin without writing low-level RPC chunking loops:
+
+```php
+use BlockchainSdk\Laravel\Facades\Blockchain;
+
+// 1. Discover incoming ERC-20 / BEP-20 token deposit hash (e.g. USDC on BSC)
+$txHash = Blockchain::driver('bsc')->getLatestIncomingTxHash(
+    address: '0xDepositSubWalletAddress...',
+    tokenContract: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' // USDC
+);
+
+// 2. Discover incoming Solana SPL token or native SOL transfer signature
+$solSignature = Blockchain::driver('solana')->getLatestIncomingTxHash(
+    address: 'SolanaDepositAddress...'
+);
+
+// 3. Discover incoming TRON TRC-20 (USDT) or native TRX transfer
+$tronTxId = Blockchain::driver('tron')->getLatestIncomingTxHash(
+    address: 'TRON_Address_Here...',
+    tokenContract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' // USDT
+);
+
+// 4. Discover incoming Bitcoin SegWit transaction ID
+$btcTxId = Blockchain::driver('bitcoin')->getLatestIncomingTxHash(
+    address: 'bc1q...'
+);
+```
+
+---
+
 ### 6. Sweeping Sub-Wallets into Master Vaults in Laravel
 
 #### A. Sweeping Native Currency via Facade

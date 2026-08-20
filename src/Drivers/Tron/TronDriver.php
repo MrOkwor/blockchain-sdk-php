@@ -100,7 +100,7 @@ class TronDriver implements NetworkDriverInterface
         if ($tokenContract) {
             $contractHex = bin2hex(Base58::decodeCheck($tokenContract));
             $decimals = (int)($params['decimals'] ?? 6);
-            $amountSun = (string)($params['amount_raw'] ?? bcmul((string)($params['amount'] ?? '0'), bcpow('10', (string)$decimals), 0));
+            $amountSun = (string)($params['amount_raw'] ?? \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'] ?? '0', $decimals));
             $paramHex = str_pad(substr($toHex, 2), 64, '0', STR_PAD_LEFT) . str_pad(gmp_strval(gmp_init($amountSun, 10), 16), 64, '0', STR_PAD_LEFT);
 
             $txData = $this->rpc->post('wallet/triggersmartcontract', [
@@ -112,7 +112,7 @@ class TronDriver implements NetworkDriverInterface
             ]);
             $rawTx = $txData['transaction'] ?? [];
         } else {
-            $amountSun = (int)($params['amount_sun'] ?? (floatval($params['amount'] ?? 0) * 1e6));
+            $amountSun = (int)($params['amount_sun'] ?? \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'] ?? '0', 6));
             $rawTx = $this->rpc->post('wallet/createtransaction', [
                 'owner_address' => $ownerHex,
                 'to_address' => $toHex,
@@ -203,5 +203,42 @@ class TronDriver implements NetworkDriverInterface
         } catch (\Throwable $e) {
             return new TransactionResult(false, null, is_string($signedRawTx) ? $signedRawTx : json_encode($signedRawTx), $e->getMessage());
         }
+    }
+
+    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
+    {
+        try {
+            $client = new \GuzzleHttp\Client(['timeout' => 5, 'http_errors' => false]);
+            if ($tokenContract) {
+                $url = "https://api.trongrid.io/v1/accounts/{$address}/transactions/trc20?limit=5";
+                $res = $client->get($url);
+                if ($res->getStatusCode() === 200) {
+                    $data = json_decode($res->getBody()->getContents(), true);
+                    foreach ($data['data'] ?? [] as $tx) {
+                        $to = $tx['to'] ?? '';
+                        if ($to === $address) {
+                            return $tx['transaction_id'] ?? null;
+                        }
+                    }
+                }
+            } else {
+                $url = "https://api.trongrid.io/v1/accounts/{$address}/transactions?limit=5";
+                $res = $client->get($url);
+                if ($res->getStatusCode() === 200) {
+                    $data = json_decode($res->getBody()->getContents(), true);
+                    foreach ($data['data'] ?? [] as $tx) {
+                        $param = $tx['raw_data']['contract'][0]['parameter']['value'] ?? [];
+                        $to = $param['to_address'] ?? '';
+                        if (!empty($tx['txID'])) {
+                            return $tx['txID'];
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // Silently fallback
+        }
+
+        return null;
     }
 }

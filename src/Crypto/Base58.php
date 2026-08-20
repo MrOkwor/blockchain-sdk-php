@@ -38,9 +38,13 @@ class Base58
             $int = gmp_add(gmp_mul($int, $base), $pos);
         }
 
-        $hex = gmp_strval($int, 16);
-        if (strlen($hex) % 2 !== 0) $hex = '0' . $hex;
-        $bin = hex2bin($hex);
+        if (gmp_cmp($int, 0) === 0) {
+            $bin = '';
+        } else {
+            $hex = gmp_strval($int, 16);
+            if (strlen($hex) % 2 !== 0) $hex = '0' . $hex;
+            $bin = hex2bin($hex);
+        }
 
         for ($i = 0; $i < strlen($base58) && $base58[$i] === '1'; $i++) {
             $bin = "\x00" . $bin;

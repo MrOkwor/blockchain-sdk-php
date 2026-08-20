@@ -93,7 +93,7 @@ class BitcoinDriver implements NetworkDriverInterface
             return new TransactionResult(false, null, null, "No confirmed UTXOs found for address {$from}.");
         }
 
-        $amountSat = (int)($params['amount_sat'] ?? (floatval($params['amount'] ?? 0) * 1e8));
+        $amountSat = (int)($params['amount_sat'] ?? \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'] ?? '0', 8));
         $feeRate = (int)($params['fee_rate'] ?? 20);
 
         $unsignedTx = BitcoinTransactionSigner::buildUnsignedSegwitTx(
@@ -169,5 +169,23 @@ class BitcoinDriver implements NetworkDriverInterface
         } catch (\Throwable $e) {
             return new TransactionResult(false, null, $signedRawTx, $e->getMessage());
         }
+    }
+
+    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
+    {
+        try {
+            $client = new \GuzzleHttp\Client(['timeout' => 5, 'http_errors' => false]);
+            $res = $client->get("https://mempool.space/api/address/{$address}/txs");
+            if ($res->getStatusCode() === 200) {
+                $txs = json_decode($res->getBody()->getContents(), true);
+                if (!empty($txs[0]['txid'])) {
+                    return $txs[0]['txid'];
+                }
+            }
+        } catch (\Throwable $e) {
+            // Silently fallback
+        }
+
+        return null;
     }
 }

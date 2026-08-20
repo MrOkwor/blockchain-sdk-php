@@ -25,4 +25,6 @@ interface NetworkDriverInterface
     public function fuelSubWallet(string $masterGasPrivateKey, string $subWalletAddress, ?string $tokenContract = null): TransactionResult;
 
     public function sweepTokenWithGasSponsorship(string $subWalletPrivateKey, string $masterGasPrivateKey, string $toVaultAddress, string $tokenContract, ?string $amount = null): TransactionResult;
+
+    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string;
 }
