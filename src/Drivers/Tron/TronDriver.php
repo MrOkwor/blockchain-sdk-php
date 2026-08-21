@@ -71,7 +71,11 @@ class TronDriver implements NetworkDriverInterface
         }
 
         try {
-            $res = $this->rpc->post('wallet/getaccount', ['address' => $address]);
+            $addrHex = str_starts_with($address, '41') && strlen($address) === 42 
+                ? $address 
+                : bin2hex(Base58::decodeCheck($address));
+
+            $res = $this->rpc->post('wallet/getaccount', ['address' => $addrHex]);
             $sun = (string)($res['balance'] ?? 0);
 
             return new TokenBalance(
@@ -81,7 +85,21 @@ class TronDriver implements NetworkDriverInterface
                 decimals: 6
             );
         } catch (\Throwable $e) {
-            return new TokenBalance('TRX', '0', '0.000000', 6);
+            try {
+                $client = new \GuzzleHttp\Client(['timeout' => 5, 'verify' => false]);
+                $res = $client->get("https://api.trongrid.io/v1/accounts/{$address}");
+                $data = json_decode($res->getBody()->getContents(), true);
+                $sun = (string)($data['data'][0]['balance'] ?? 0);
+
+                return new TokenBalance(
+                    symbol: 'TRX',
+                    balanceRaw: $sun,
+                    balanceFormatted: bcdiv($sun, '1000000', 6),
+                    decimals: 6
+                );
+            } catch (\Throwable $ex) {
+                return new TokenBalance('TRX', '0', '0.000000', 6);
+            }
         }
     }
 
@@ -240,5 +258,10 @@ class TronDriver implements NetworkDriverInterface
         }
 
         return null;
+    }
+
+    public function getRpc(): RpcClient
+    {
+        return $this->rpc;
     }
 }

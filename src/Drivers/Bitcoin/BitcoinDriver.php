@@ -15,12 +15,14 @@ class BitcoinDriver implements NetworkDriverInterface
     private BitcoinWalletGenerator $generator;
     private BitcoinTransactionSigner $signer;
     private RpcClient $rpc;
+    private array $rpcNodes;
 
     public function __construct(array $config)
     {
         $this->generator = new BitcoinWalletGenerator();
         $this->signer = new BitcoinTransactionSigner();
-        $this->rpc = new RpcClient($config['rpc_nodes'] ?? ['https://mempool.space/api', 'https://blockstream.info/api']);
+        $this->rpcNodes = $config['rpc_nodes'] ?? ['https://blockstream.info/api', 'https://mempool.space/api'];
+        $this->rpc = new RpcClient($this->rpcNodes);
     }
 
     public function generateWallet(): Keypair
@@ -158,34 +160,65 @@ class BitcoinDriver implements NetworkDriverInterface
 
     public function broadcastRawTransaction(string $signedRawTx): TransactionResult
     {
-        try {
-            $res = $this->rpc->post('tx', ['tx' => $signedRawTx]);
-            $txid = is_string($res) ? trim($res) : ($res['txid'] ?? null);
-            return new TransactionResult(
-                success: !empty($txid),
-                txHash: $txid,
-                rawSignedHex: $signedRawTx
-            );
-        } catch (\Throwable $e) {
-            return new TransactionResult(false, null, $signedRawTx, $e->getMessage());
+        $client = new \GuzzleHttp\Client([
+            'timeout' => 10,
+            'verify'  => false,
+        ]);
+
+        $nodes = $this->rpcNodes ?? ['https://blockstream.info/api', 'https://mempool.space/api'];
+        $lastError = null;
+
+        foreach ($nodes as $baseUrl) {
+            try {
+                $endpoint = rtrim($baseUrl, '/') . '/tx';
+                $res = $client->post($endpoint, [
+                    'headers' => [
+                        'Content-Type' => 'text/plain',
+                        'User-Agent'   => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                    ],
+                    'body' => trim($signedRawTx),
+                ]);
+
+                $txid = trim((string)$res->getBody());
+                if (!empty($txid) && !str_contains($txid, 'error')) {
+                    return new TransactionResult(
+                        success: true,
+                        txHash: $txid,
+                        rawSignedHex: $signedRawTx
+                    );
+                }
+            } catch (\Throwable $e) {
+                $lastError = $e->getMessage();
+            }
         }
+
+        return new TransactionResult(false, null, $signedRawTx, "All Bitcoin broadcast nodes failed. Last error: " . ($lastError ?? 'Unknown error'));
     }
 
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
     {
-        try {
-            $client = new \GuzzleHttp\Client(['timeout' => 5, 'http_errors' => false]);
-            $res = $client->get("https://mempool.space/api/address/{$address}/txs");
-            if ($res->getStatusCode() === 200) {
-                $txs = json_decode($res->getBody()->getContents(), true);
-                if (!empty($txs[0]['txid'])) {
-                    return $txs[0]['txid'];
+        $nodes = ['https://blockstream.info/api', 'https://mempool.space/api'];
+        $client = new \GuzzleHttp\Client(['timeout' => 5, 'verify' => false, 'http_errors' => false]);
+
+        foreach ($nodes as $baseUrl) {
+            try {
+                $res = $client->get(rtrim($baseUrl, '/') . "/address/{$address}/txs");
+                if ($res->getStatusCode() === 200) {
+                    $txs = json_decode($res->getBody()->getContents(), true);
+                    if (!empty($txs[0]['txid'])) {
+                        return $txs[0]['txid'];
+                    }
                 }
+            } catch (\Throwable $e) {
+                // Try next node
             }
-        } catch (\Throwable $e) {
-            // Silently fallback
         }
 
         return null;
+    }
+
+    public function getRpc(): RpcClient
+    {
+        return $this->rpc;
     }
 }

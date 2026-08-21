@@ -16,6 +16,7 @@ class RpcClient
         $this->nodes = !empty($nodes) ? array_values($nodes) : ['http://localhost:8545'];
         $this->httpClient = new Client([
             'timeout' => $timeout,
+            'verify'  => false,
             'headers' => array_merge(['Content-Type' => 'application/json'], $headers),
         ]);
     }

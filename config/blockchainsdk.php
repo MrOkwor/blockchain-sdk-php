@@ -372,8 +372,8 @@ return [
             'type'       => 'bitcoin',
             'currency'   => 'BTC',
             'rpc_nodes'  => [
-                'https://mempool.space/api',
                 'https://blockstream.info/api',
+                'https://mempool.space/api',
             ],
             'tokens'     => [],
         ],

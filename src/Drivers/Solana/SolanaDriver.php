@@ -206,4 +206,9 @@ class SolanaDriver implements NetworkDriverInterface
 
         return null;
     }
+
+    public function getRpc(): RpcClient
+    {
+        return $this->rpc;
+    }
 }
