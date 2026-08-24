@@ -49,16 +49,28 @@ class EvmDriver implements NetworkDriverInterface
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance
     {
         if ($tokenContract) {
-            $data = '0x70a08231000000000000000000000000' . ltrim($address, '0x');
+            $cleanAddr = strtolower(ltrim($address, '0x'));
+            $data = '0x70a08231' . str_pad($cleanAddr, 64, '0', STR_PAD_LEFT);
             $res = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => $data], 'latest']);
             $hex = $res['result'] ?? '0x0';
+            if (empty($hex) || $hex === '0x' || !ctype_xdigit(ltrim($hex, '0x'))) {
+                $hex = '0x0';
+            }
             $rawDec = gmp_strval(gmp_init($hex, 16), 10);
 
             // Fetch token decimals dynamically (0x313ce567 = decimals())
-            $decRes = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
-            $decimals = hexdec($decRes['result'] ?? '0x12');
-            if ($decimals <= 0 || $decimals > 36) {
-                $decimals = 18;
+            $decimals = 18;
+            try {
+                $decRes = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
+                $decHex = $decRes['result'] ?? '';
+                if (!empty($decHex) && $decHex !== '0x') {
+                    $parsedDec = hexdec($decHex);
+                    if ($parsedDec > 0 && $parsedDec <= 36) {
+                        $decimals = $parsedDec;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Fallback to default
             }
 
             $formatted = bcdiv($rawDec, bcpow('10', (string)$decimals), min($decimals, 8));

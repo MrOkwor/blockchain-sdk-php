@@ -157,8 +157,8 @@ return [
             'currency'   => 'ETH',
             'rpc_nodes'  => [
                 'https://cloudflare-eth.com',
-                'https://rpc.ankr.com/eth',
-                'https://eth.llamarpc.com',
+                'https://ethereum-rpc.publicnode.com',
+                'https://1rpc.io/eth',
             ],
             'tokens' => [
                 'USDT' => ['name' => 'Tether USD', 'contract' => '0xdAC17F958D2ee523a2206206994597C13D831ec7', 'decimals' => 6, 'status' => 'enabled'],
@@ -177,7 +177,7 @@ return [
             'rpc_nodes'  => [
                 'https://bsc-dataseed.binance.org',
                 'https://bsc-dataseed1.defibit.io',
-                'https://rpc.ankr.com/bsc',
+                'https://bsc-rpc.publicnode.com',
             ],
             'tokens' => [
                 'USDT'  => ['name' => 'Tether USD', 'contract' => '0x55d398326f99059fF775485246999027B3197955', 'decimals' => 18, 'status' => 'enabled'],
@@ -195,7 +195,8 @@ return [
             'currency'   => 'POL',
             'rpc_nodes'  => [
                 'https://polygon-rpc.com',
-                'https://rpc.ankr.com/polygon',
+                'https://polygon-bor-rpc.publicnode.com',
+                'https://1rpc.io/matic',
             ],
             'tokens' => [
                 'USDT' => ['name' => 'Tether USD', 'contract' => '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', 'decimals' => 6, 'status' => 'enabled'],
@@ -240,7 +241,8 @@ return [
             'currency'   => 'ETH',
             'rpc_nodes'  => [
                 'https://mainnet.base.org',
-                'https://base.llamarpc.com',
+                'https://base-rpc.publicnode.com',
+                'https://1rpc.io/base',
             ],
             'tokens' => [
                 'USDC'  => ['name' => 'USD Coin',   'contract' => '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'decimals' => 6, 'status' => 'enabled'],
@@ -256,7 +258,7 @@ return [
             'currency'   => 'AVAX',
             'rpc_nodes'  => [
                 'https://api.avax.network/ext/bc/C/rpc',
-                'https://rpc.ankr.com/avalanche',
+                'https://avalanche-c-chain-rpc.publicnode.com',
             ],
             'tokens' => [
                 'USDT' => ['name' => 'Tether USD', 'contract' => '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', 'decimals' => 6, 'status' => 'enabled'],
@@ -268,7 +270,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 250,
             'currency'   => 'FTM',
-            'rpc_nodes'  => ['https://rpc.ftm.tools', 'https://rpc.ankr.com/fantom'],
+            'rpc_nodes'  => ['https://rpc.ftm.tools', 'https://fantom.drpc.org', 'https://rpcapi.fantom.network'],
             'tokens'     => [
                 'USDC' => ['name' => 'USD Coin', 'contract' => '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', 'decimals' => 6, 'status' => 'enabled'],
             ],
@@ -278,7 +280,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 25,
             'currency'   => 'CRO',
-            'rpc_nodes'  => ['https://evm.cronos.org'],
+            'rpc_nodes'  => ['https://evm.cronos.org', 'https://cronos-evm-rpc.publicnode.com'],
             'tokens'     => [
                 'USDC' => ['name' => 'USD Coin', 'contract' => '0xc21223249CA28397B4B6541dfFaEcC539BfF0c59', 'decimals' => 6, 'status' => 'enabled'],
             ],
@@ -288,7 +290,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 59144,
             'currency'   => 'ETH',
-            'rpc_nodes'  => ['https://rpc.linea.build'],
+            'rpc_nodes'  => ['https://rpc.linea.build', 'https://linea-rpc.publicnode.com', 'https://1rpc.io/linea'],
             'tokens'     => [
                 'USDC' => ['name' => 'USD Coin', 'contract' => '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', 'decimals' => 6, 'status' => 'enabled'],
             ],
@@ -298,7 +300,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 534352,
             'currency'   => 'ETH',
-            'rpc_nodes'  => ['https://rpc.scroll.io'],
+            'rpc_nodes'  => ['https://rpc.scroll.io', 'https://scroll-rpc.publicnode.com', 'https://1rpc.io/scroll'],
             'tokens'     => [
                 'USDC' => ['name' => 'USD Coin', 'contract' => '0x06eFdBF5e0942eF74522dF9b1384e2aC0422551A', 'decimals' => 6, 'status' => 'enabled'],
             ],
@@ -308,7 +310,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 324,
             'currency'   => 'ETH',
-            'rpc_nodes'  => ['https://mainnet.era.zksync.io'],
+            'rpc_nodes'  => ['https://mainnet.era.zksync.io', 'https://zksync-era-rpc.publicnode.com', 'https://1rpc.io/zksync2-era'],
             'tokens'     => [
                 'USDC' => ['name' => 'USD Coin', 'contract' => '0x1d17CBcF0D6D143135aE902365D2E5e2A16538D4', 'decimals' => 6, 'status' => 'enabled'],
             ],
@@ -318,7 +320,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 42220,
             'currency'   => 'CELO',
-            'rpc_nodes'  => ['https://forno.celo.org'],
+            'rpc_nodes'  => ['https://forno.celo.org', 'https://celo-rpc.publicnode.com', 'https://1rpc.io/celo'],
             'tokens'     => [
                 'USDT' => ['name' => 'Tether USD', 'contract' => '0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e', 'decimals' => 6, 'status' => 'enabled'],
                 'cUSD' => ['name' => 'Celo Dollar','contract' => '0x765DE816845861e75A25fCA122bb6898B8B1282a', 'decimals' => 18, 'status' => 'enabled'],
@@ -329,7 +331,7 @@ return [
             'type'       => 'evm',
             'chain_id'   => 5000,
             'currency'   => 'MNT',
-            'rpc_nodes'  => ['https://rpc.mantle.xyz'],
+            'rpc_nodes'  => ['https://rpc.mantle.xyz', 'https://mantle-rpc.publicnode.com', 'https://1rpc.io/mantle'],
             'tokens'     => [
                 'USDT' => ['name' => 'Tether USD', 'contract' => '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE', 'decimals' => 6, 'status' => 'enabled'],
             ],
@@ -342,7 +344,7 @@ return [
             'currency'   => 'SOL',
             'rpc_nodes'  => [
                 'https://api.mainnet-beta.solana.com',
-                'https://solana-mainnet.rpc.extrnode.com',
+                'https://solana-rpc.publicnode.com',
             ],
             'tokens' => [
                 'USDC' => ['name' => 'USD Coin', 'contract' => 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'decimals' => 6, 'status' => 'enabled'],

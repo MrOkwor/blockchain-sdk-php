@@ -44,23 +44,27 @@ class SolanaDriver implements NetworkDriverInterface
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance
     {
         if ($tokenContract) {
-            $res = $this->rpc->call('getTokenAccountsByOwner', [
-                $address,
-                ['mint' => $tokenContract],
-                ['encoding' => 'jsonParsed']
-            ]);
-            $accounts = $res['result']['value'] ?? [];
             $amountRaw = '0';
             $decimals = 6;
-            if (!empty($accounts)) {
-                $info = $accounts[0]['account']['data']['parsed']['info']['tokenAmount'];
-                $amountRaw = (string)$info['amount'];
-                $decimals = (int)$info['decimals'];
+            try {
+                $res = $this->rpc->call('getTokenAccountsByOwner', [
+                    $address,
+                    ['mint' => $tokenContract],
+                    ['encoding' => 'jsonParsed']
+                ]);
+                $accounts = $res['result']['value'] ?? [];
+                if (!empty($accounts)) {
+                    $info = $accounts[0]['account']['data']['parsed']['info']['tokenAmount'];
+                    $amountRaw = (string)$info['amount'];
+                    $decimals = (int)$info['decimals'];
+                }
+            } catch (\Throwable $e) {
+                // Default to 0 balance if no token account found
             }
             return new TokenBalance(
                 symbol: 'SPL',
                 balanceRaw: $amountRaw,
-                balanceFormatted: bcdiv($amountRaw, bcpow('10', (string)$decimals), 6),
+                balanceFormatted: bcdiv($amountRaw, bcpow('10', (string)$decimals), min($decimals, 6)),
                 decimals: $decimals
             );
         }
