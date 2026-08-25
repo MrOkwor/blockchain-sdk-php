@@ -57,18 +57,23 @@ class MonitorCommand extends Command
 
             foreach ($wallets as $wallet) {
                 // 1. Scan configured tokens
-                foreach ($tokens as $token) {
+                foreach ($tokens as $symKey => $token) {
                     if (!$token) continue;
 
                     $tokenContract = $token['contract'] ?? null;
-                    $tokenSymbol   = $token['symbol'] ?? 'TOKEN';
+                    $tokenSymbol   = !empty($token['symbol']) ? strtoupper($token['symbol']) : (is_string($symKey) ? strtoupper($symKey) : 'TOKEN');
 
                     try {
                         $balance = $driver->getBalance($wallet->address, $tokenContract);
                         $balanceAmount = (float)$balance->balanceFormatted;
 
                         if ($balanceAmount > 0) {
-                            $txHash = $driver->getLatestIncomingTxHash($wallet->address, $tokenContract);
+                            $txDetails = method_exists($driver, 'getLatestIncomingTransaction')
+                                ? $driver->getLatestIncomingTransaction($wallet->address, $tokenContract)
+                                : null;
+
+                            $txHash = $txDetails['tx_hash'] ?? $driver->getLatestIncomingTxHash($wallet->address, $tokenContract);
+                            $fromAddress = $txDetails['from_address'] ?? null;
                             $finalTxHash = $txHash ?: ('detected_' . substr(md5($wallet->address . $tokenSymbol . time()), 0, 16));
 
                             $existing = $depositModel::where('tx_hash', $finalTxHash)
@@ -82,6 +87,7 @@ class MonitorCommand extends Command
                                 $deposit = $depositModel::create([
                                     'wallet_id'      => $wallet->id,
                                     'network'        => $network,
+                                    'from_address'   => $fromAddress,
                                     'to_address'     => $wallet->address,
                                     'token_symbol'   => $tokenSymbol,
                                     'token_contract' => $tokenContract,
@@ -92,7 +98,7 @@ class MonitorCommand extends Command
                                     'is_swept'       => false,
                                 ]);
 
-                                $this->info("✓ Deposit detected on [{$network}]: {$balanceAmount} {$tokenSymbol} on {$wallet->address} (Tx: {$finalTxHash})");
+                                $this->info("✓ Deposit detected on [{$network}]: {$balanceAmount} {$tokenSymbol} on {$wallet->address} (Tx: {$finalTxHash}, From: " . ($fromAddress ?? 'Unknown') . ")");
                                 event(new DepositConfirmed($deposit));
                                 $totalDetected++;
                             }
@@ -108,14 +114,20 @@ class MonitorCommand extends Command
                     $nativeAmount = (float)$nativeBalance->balanceFormatted;
 
                     if ($nativeAmount > 0.001) {
-                        $txHash = $driver->getLatestIncomingTxHash($wallet->address);
-                        $finalTxHash = $txHash ?: ('native_' . substr(md5($wallet->address . 'NATIVE' . time()), 0, 16));
+                        $nativeTxDetails = method_exists($driver, 'getLatestIncomingTransaction')
+                            ? $driver->getLatestIncomingTransaction($wallet->address)
+                            : null;
+
+                        $nativeTxHash = $nativeTxDetails['tx_hash'] ?? $driver->getLatestIncomingTxHash($wallet->address);
+                        $nativeFrom = $nativeTxDetails['from_address'] ?? null;
+                        $finalTxHash = $nativeTxHash ?: ('native_' . substr(md5($wallet->address . 'NATIVE' . time()), 0, 16));
 
                         $existing = $depositModel::where('tx_hash', $finalTxHash)->first();
                         if (!$existing) {
                             $deposit = $depositModel::create([
                                 'wallet_id'      => $wallet->id,
                                 'network'        => $network,
+                                'from_address'   => $nativeFrom,
                                 'to_address'     => $wallet->address,
                                 'token_symbol'   => 'NATIVE',
                                 'token_contract' => null,
@@ -126,7 +138,7 @@ class MonitorCommand extends Command
                                 'is_swept'       => false,
                             ]);
 
-                            $this->info("✓ Native deposit detected on [{$network}]: {$nativeAmount} on {$wallet->address}");
+                            $this->info("✓ Native deposit detected on [{$network}]: {$nativeAmount} on {$wallet->address} (From: " . ($nativeFrom ?? 'Unknown') . ")");
                             event(new DepositConfirmed($deposit));
                             $totalDetected++;
                         }

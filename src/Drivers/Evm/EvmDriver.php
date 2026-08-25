@@ -256,42 +256,10 @@ class EvmDriver implements NetworkDriverInterface
         }
     }
 
-    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
+    public function getLatestIncomingTransaction(string $address, ?string $tokenContract = null): ?array
     {
         try {
-            $currentBlockHex = $this->rpc->call('eth_blockNumber', [])['result'] ?? null;
-            if (!$currentBlockHex) return null;
-            $currentBlock = hexdec($currentBlockHex);
-
-            // 1. If ERC-20 token, search Transfer logs backwards in 50-block chunks (up to 1,000 blocks back)
-            if ($tokenContract) {
-                $transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-                $paddedAddress = '0x' . str_pad(substr(strtolower($address), 2), 64, '0', STR_PAD_LEFT);
-                $chunkSize = 50;
-                $maxLookback = 1000;
-
-                for ($i = 0; $i * $chunkSize < $maxLookback; $i++) {
-                    $toBlock = $currentBlock - ($i * $chunkSize);
-                    $fromBlock = max(0, $toBlock - $chunkSize + 1);
-
-                    $res = $this->rpc->call('eth_getLogs', [[
-                        'fromBlock' => '0x' . dechex($fromBlock),
-                        'toBlock'   => '0x' . dechex($toBlock),
-                        'address'   => $tokenContract,
-                        'topics'    => [$transferTopic, null, $paddedAddress],
-                    ]]);
-
-                    $logs = $res['result'] ?? [];
-                    if (!empty($logs)) {
-                        $lastLog = end($logs);
-                        if (!empty($lastLog['transactionHash'])) {
-                            return $lastLog['transactionHash'];
-                        }
-                    }
-                }
-            }
-
-            // 2. Blockscout v2 Keyless API fallback for supported EVM chains
+            // 1. Direct Explorer API Fallback (Blockscout, Bscscan / Etherscan public APIs)
             $blockscoutHosts = [
                 1      => 'eth.blockscout.com',
                 10     => 'optimism.blockscout.com',
@@ -305,17 +273,77 @@ class EvmDriver implements NetworkDriverInterface
 
             if (isset($blockscoutHosts[$this->chainId])) {
                 $host = $blockscoutHosts[$this->chainId];
-                $client = new \GuzzleHttp\Client(['timeout' => 5, 'http_errors' => false]);
-                $url = "https://{$host}/api/v2/addresses/{$address}/token-transfers";
-                $res = $client->get($url);
-                if ($res->getStatusCode() === 200) {
-                    $data = json_decode($res->getBody()->getContents(), true);
-                    foreach ($data['items'] ?? [] as $item) {
-                        $to = strtolower($item['to']['hash'] ?? '');
-                        if ($to === strtolower($address)) {
-                            if (!$tokenContract || strtolower($item['token']['address'] ?? '') === strtolower($tokenContract)) {
-                                return $item['transaction_hash'] ?? null;
+                $client = new \GuzzleHttp\Client(['timeout' => 4, 'http_errors' => false]);
+
+                if ($tokenContract) {
+                    $url = "https://{$host}/api/v2/addresses/{$address}/token-transfers";
+                    $res = $client->get($url);
+                    if ($res->getStatusCode() === 200) {
+                        $data = json_decode($res->getBody()->getContents(), true);
+                        foreach ($data['items'] ?? [] as $item) {
+                            $to = strtolower($item['to']['hash'] ?? '');
+                            if ($to === strtolower($address)) {
+                                $itemContract = strtolower($item['token']['address'] ?? '');
+                                if (!$tokenContract || $itemContract === strtolower($tokenContract)) {
+                                    $txHash = $item['transaction_hash'] ?? null;
+                                    $from = $item['from']['hash'] ?? null;
+                                    if ($txHash) {
+                                        return [
+                                            'tx_hash'      => $txHash,
+                                            'from_address' => $from,
+                                        ];
+                                    }
+                                }
                             }
+                        }
+                    }
+                } else {
+                    $url = "https://{$host}/api/v2/addresses/{$address}/transactions";
+                    $res = $client->get($url);
+                    if ($res->getStatusCode() === 200) {
+                        $data = json_decode($res->getBody()->getContents(), true);
+                        foreach ($data['items'] ?? [] as $item) {
+                            $to = strtolower($item['to']['hash'] ?? '');
+                            if ($to === strtolower($address) && ($item['status'] ?? '') === 'ok') {
+                                return [
+                                    'tx_hash'      => $item['hash'] ?? null,
+                                    'from_address' => $item['from']['hash'] ?? null,
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. RPC-based eth_getLogs for ERC-20 tokens (query 2,000 blocks back)
+            if ($tokenContract) {
+                $currentBlockHex = $this->rpc->call('eth_blockNumber', [])['result'] ?? null;
+                if ($currentBlockHex) {
+                    $currentBlock = hexdec($currentBlockHex);
+                    $transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+                    $paddedAddress = '0x' . str_pad(substr(strtolower($address), 2), 64, '0', STR_PAD_LEFT);
+
+                    $fromBlock = max(0, $currentBlock - 2000);
+
+                    $res = $this->rpc->call('eth_getLogs', [[
+                        'fromBlock' => '0x' . dechex($fromBlock),
+                        'toBlock'   => '0x' . dechex($currentBlock),
+                        'address'   => $tokenContract,
+                        'topics'    => [$transferTopic, null, $paddedAddress],
+                    ]]);
+
+                    $logs = $res['result'] ?? [];
+                    if (!empty($logs) && is_array($logs)) {
+                        $lastLog = end($logs);
+                        $txHash = $lastLog['transactionHash'] ?? null;
+                        $fromTopic = $lastLog['topics'][1] ?? null;
+                        $fromAddress = $fromTopic ? ('0x' . substr($fromTopic, 26)) : null;
+
+                        if ($txHash) {
+                            return [
+                                'tx_hash'      => $txHash,
+                                'from_address' => $fromAddress,
+                            ];
                         }
                     }
                 }
@@ -325,6 +353,12 @@ class EvmDriver implements NetworkDriverInterface
         }
 
         return null;
+    }
+
+    public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
+    {
+        $tx = $this->getLatestIncomingTransaction($address, $tokenContract);
+        return $tx['tx_hash'] ?? null;
     }
 
     public function getRpc(): RpcClient
