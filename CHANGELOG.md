@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.0.15] - 2026-08-25
+
+### 🎯 Final Audit Sign-Off Remediations
+
+- **ACC-01 / ACC-03 (Full Event Identity & Idempotency)**:
+  - `MonitorCommand` now queries and stores deposits strictly by `where('network', $network)->where('tx_hash', $txHash)->where('log_index', $logIndex)`.
+  - Persists `log_index`, `block_number`, `amount_raw`, and `decimals` to capture multiple `Transfer` events occurring within the same transaction or block.
+- **ACC-04a (Arbitrary-Precision Monetary Checks)**:
+  - Removed all `(float)` conversions in `MonitorCommand`; zero and dust threshold checks now execute via exact BCMath operations (`bccomp($amountRaw, '0') > 0` and `bccomp($amountRaw, '100000000000000') > 0`).
+- **ACC-04b (Authoritative Token Metadata & Strict Decimals)**:
+  - `EvmDriver::getBalance()` now consults configured token metadata first (`config['tokens']`).
+  - If a contract's on-chain `decimals()` query fails and is not in configuration, it **fails explicitly with a descriptive exception** rather than silently assuming 18 decimals.
+- **TX-02 (Universal Distributed & Multi-Process Nonce Manager)**:
+  - Replaced process-local static array with an atomic distributed lock via `Cache::lock()` for Laravel multi-worker/multi-server setups and native OS file locking (`flock(LOCK_EX)`) for standalone plain PHP multi-process setups.
+- **TEST-01 (Regression Tests)**:
+  - Added regression test cases in `tests/BlockchainSdkTest.php` for unresolvable decimal failures and arbitrary-precision threshold validation.
+
+---
+
 ## [v1.0.14] - 2026-08-25
 
 ### 🔒 Security & Accounting Audit Remediation

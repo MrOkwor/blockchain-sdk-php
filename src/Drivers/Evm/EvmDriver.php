@@ -15,9 +15,11 @@ class EvmDriver implements NetworkDriverInterface
     private RpcClient $rpc;
     private int $chainId;
     private string $currency;
+    private array $config;
 
     public function __construct(array $config)
     {
+        $this->config = $config;
         $this->generator = new EvmWalletGenerator();
         $this->signer = new EvmTransactionSigner();
         $this->rpc = new RpcClient(
@@ -54,31 +56,51 @@ class EvmDriver implements NetworkDriverInterface
     public function getBalance(string $address, ?string $tokenContract = null): TokenBalance
     {
         if ($tokenContract) {
-            $cleanAddr = strtolower(ltrim($address, '0x'));
+            $cleanAddr = strtolower(EvmTransactionSigner::strip0x($address));
             $data = '0x70a08231' . str_pad($cleanAddr, 64, '0', STR_PAD_LEFT);
             $res = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => $data], 'latest']);
             $hex = $res['result'] ?? '0x0';
-            if (empty($hex) || $hex === '0x' || !ctype_xdigit(ltrim($hex, '0x'))) {
+            if (empty($hex) || $hex === '0x' || !ctype_xdigit(EvmTransactionSigner::strip0x($hex))) {
                 $hex = '0x0';
             }
             $rawDec = gmp_strval(gmp_init($hex, 16), 10);
 
-            // Fetch token decimals dynamically (0x313ce567 = decimals())
-            $decimals = 18;
-            try {
-                $decRes = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
-                $decHex = $decRes['result'] ?? '';
-                if (!empty($decHex) && $decHex !== '0x') {
-                    $parsedDec = hexdec($decHex);
-                    if ($parsedDec > 0 && $parsedDec <= 36) {
-                        $decimals = $parsedDec;
+            // 1. Check configured token metadata first (ACC-04b)
+            $decimals = null;
+            if (!empty($this->config['tokens'])) {
+                foreach ($this->config['tokens'] as $token) {
+                    if (strcasecmp($token['contract'] ?? '', $tokenContract) === 0 && isset($token['decimals'])) {
+                        $decimals = (int)$token['decimals'];
+                        break;
                     }
                 }
-            } catch (\Throwable $e) {
-                // Fallback to default
             }
 
-            $formatted = bcdiv($rawDec, bcpow('10', (string)$decimals), min($decimals, 8));
+            // 2. Query on-chain decimals() (0x313ce567) if not in static config
+            if ($decimals === null) {
+                try {
+                    $decRes = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
+                    $decHex = $decRes['result'] ?? '';
+                    if (!empty($decHex) && $decHex !== '0x') {
+                        $parsedDec = hexdec($decHex);
+                        if ($parsedDec >= 0 && $parsedDec <= 36) {
+                            $decimals = $parsedDec;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // Handled by explicit exception below
+                }
+            }
+
+            // 3. Fail explicitly if decimals cannot be established rather than silently guessing 18
+            if ($decimals === null) {
+                throw new \RuntimeException("Cannot determine decimals for token contract [{$tokenContract}]. Please configure decimals in config/blockchainsdk.php.");
+            }
+
+            $formatted = bcpow('10', (string)$decimals) !== '0'
+                ? bcdiv($rawDec, bcpow('10', (string)$decimals), min($decimals, 8))
+                : '0';
+
             return new TokenBalance('TOKEN', $rawDec, $formatted, $decimals);
         }
 
@@ -92,18 +114,61 @@ class EvmDriver implements NetworkDriverInterface
 
     public function getNextNonce(string $address): int
     {
-        $res = $this->rpc->call('eth_getTransactionCount', [$address, 'pending']);
-        $onChainNonce = hexdec($res['result'] ?? '0x0');
+        $addressKey = strtolower(EvmTransactionSigner::strip0x($address));
+        $cacheKey = "blockchainsdk_nonce_{$this->chainId}_{$addressKey}";
 
-        $addressKey = strtolower($address);
-        $localNonce = self::$allocatedNonces[$addressKey] ?? -1;
+        // 1. Laravel Multi-Worker / Multi-Server Environment: Atomic Cache Lock
+        if (class_exists(\Illuminate\Support\Facades\Cache::class)) {
+            try {
+                return \Illuminate\Support\Facades\Cache::lock("lock_{$cacheKey}", 5)->block(5, function () use ($address, $cacheKey) {
+                    $res = $this->rpc->call('eth_getTransactionCount', [$address, 'pending']);
+                    $onChainNonce = hexdec($res['result'] ?? '0x0');
+                    $cachedNonce = (int)\Illuminate\Support\Facades\Cache::get($cacheKey, -1);
+                    $nextNonce = max($onChainNonce, $cachedNonce + 1);
 
-        if ($localNonce >= $onChainNonce) {
-            $nextNonce = $localNonce + 1;
-        } else {
-            $nextNonce = $onChainNonce;
+                    \Illuminate\Support\Facades\Cache::put($cacheKey, $nextNonce, 300);
+                    return $nextNonce;
+                });
+            } catch (\Throwable $e) {
+                // Fallback to native OS lock
+            }
         }
 
+        // 2. Plain PHP Multi-Process Environment: Native OS File Lock (flock)
+        $lockFilePath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "blockchainsdk_nonce_" . md5($cacheKey) . ".lock";
+        $fp = @fopen($lockFilePath, 'c+');
+        if ($fp && @flock($fp, LOCK_EX)) {
+            try {
+                $res = $this->rpc->call('eth_getTransactionCount', [$address, 'pending']);
+                $onChainNonce = hexdec($res['result'] ?? '0x0');
+
+                $storedNonce = -1;
+                rewind($fp);
+                $content = stream_get_contents($fp);
+                if ($content !== false && $content !== '') {
+                    $storedNonce = (int)trim($content);
+                }
+
+                $nextNonce = max($onChainNonce, $storedNonce + 1);
+
+                ftruncate($fp, 0);
+                rewind($fp);
+                fwrite($fp, (string)$nextNonce);
+                fflush($fp);
+                flock($fp, LOCK_UN);
+                fclose($fp);
+                return $nextNonce;
+            } catch (\Throwable $e) {
+                @flock($fp, LOCK_UN);
+                @fclose($fp);
+            }
+        }
+
+        // 3. Fallback: Process-local static memory
+        $res = $this->rpc->call('eth_getTransactionCount', [$address, 'pending']);
+        $onChainNonce = hexdec($res['result'] ?? '0x0');
+        $localNonce = self::$allocatedNonces[$addressKey] ?? -1;
+        $nextNonce = max($onChainNonce, $localNonce + 1);
         self::$allocatedNonces[$addressKey] = $nextNonce;
         return $nextNonce;
     }

@@ -7,6 +7,7 @@ use BlockchainSdk\Crypto\Decimal;
 use BlockchainSdk\Crypto\Keccak;
 use BlockchainSdk\Crypto\Secp256k1;
 use BlockchainSdk\Drivers\Bitcoin\BitcoinTransactionSigner;
+use BlockchainSdk\Drivers\Evm\EvmDriver;
 use BlockchainSdk\Drivers\Evm\EvmTransactionSigner;
 use BlockchainSdk\Drivers\Solana\SolanaTransactionSigner;
 use BlockchainSdk\Http\RpcClient;
@@ -230,5 +231,15 @@ class BlockchainSdkTest extends TestCase
         // 3. Corrupted enc:v1: must fail closed with RuntimeException (SEC-02)
         $this->expectException(\RuntimeException::class);
         BlockchainManager::decryptSecret("enc:v1:CorruptedInvalidPayload");
+    }
+
+    public function test_unconfigured_unresolvable_token_decimals_fails_explicitly(): void
+    {
+        $driver = $this->sdk->driver('ethereum');
+
+        // Non-existent token contract with no RPC response must fail explicitly (ACC-04b)
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Cannot determine decimals for token contract');
+        $driver->getBalance('0x71C8360f3a104d31a4570b9A821929342939b422', '0x1111111111111111111111111111111111111111');
     }
 }

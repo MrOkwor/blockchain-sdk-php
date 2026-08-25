@@ -77,14 +77,17 @@ class MonitorCommand extends Command
                         : [];
 
                     foreach ($transfers as $tx) {
-                        if ($tx['tx_hash'] === $pendingDeposit->tx_hash) {
-                            $confs = $tx['confirmations'] ?? 1;
+                        $txLogIndex = (int)($tx['log_index'] ?? 0);
+                        $depositLogIndex = (int)($pendingDeposit->log_index ?? 0);
+
+                        if ($tx['tx_hash'] === $pendingDeposit->tx_hash && $txLogIndex === $depositLogIndex) {
+                            $confs = (int)($tx['confirmations'] ?? 1);
                             $pendingDeposit->confirmations = $confs;
 
                             if ($confs >= $requiredConfirmations) {
                                 $pendingDeposit->status = 'confirmed';
                                 $pendingDeposit->save();
-                                $this->info("✓ Deposit reached finality on [{$network}]: {$pendingDeposit->amount} {$pendingDeposit->token_symbol} (Tx: {$pendingDeposit->tx_hash}, Confs: {$confs})");
+                                $this->info("✓ Deposit reached finality on [{$network}]: {$pendingDeposit->amount} {$pendingDeposit->token_symbol} (Tx: {$pendingDeposit->tx_hash}, Log: {$depositLogIndex}, Confs: {$confs})");
                                 event(new DepositConfirmed($pendingDeposit));
                             } else {
                                 $pendingDeposit->save();
@@ -115,31 +118,43 @@ class MonitorCommand extends Command
                             $txHash = $transfer['tx_hash'];
                             if (empty($txHash)) continue;
 
+                            $logIndex      = (int)($transfer['log_index'] ?? 0);
+                            $blockNumber   = isset($transfer['block_number']) ? (int)$transfer['block_number'] : null;
                             $fromAddress   = $transfer['from_address'] ?? null;
-                            $amountRaw     = $transfer['amount_raw'] ?? '0';
-                            $amountDecimal = $transfer['amount'] ?? '0.00000000';
-                            $confirmations = $transfer['confirmations'] ?? 1;
+                            $amountRaw     = (string)($transfer['amount_raw'] ?? '0');
+                            $amountDecimal = (string)($transfer['amount'] ?? '0.00000000');
+                            $confirmations = (int)($transfer['confirmations'] ?? 1);
                             $isFinal       = $confirmations >= $requiredConfirmations;
                             $status        = $isFinal ? 'confirmed' : 'pending';
 
-                            $existing = $depositModel::where('tx_hash', $txHash)->first();
+                            // Immutable blockchain transfer identity: network + tx_hash + log_index
+                            $existing = $depositModel::where('network', $network)
+                                ->where('tx_hash', $txHash)
+                                ->where('log_index', $logIndex)
+                                ->first();
 
-                            if (!$existing && (float)$amountDecimal > 0) {
+                            // Arbitrary-precision zero check (ACC-04a)
+                            if (!$existing && bccomp($amountRaw, '0') > 0) {
                                 $deposit = $depositModel::create([
                                     'wallet_id'      => $wallet->id,
                                     'network'        => $network,
+                                    'tx_hash'        => $txHash,
+                                    'log_index'      => $logIndex,
+                                    'block_number'   => $blockNumber,
                                     'from_address'   => $fromAddress,
                                     'to_address'     => $wallet->address,
                                     'token_symbol'   => $tokenSymbol,
                                     'token_contract' => $tokenContract,
+                                    'amount_raw'     => $amountRaw,
                                     'amount'         => $amountDecimal,
+                                    'decimals'       => $tokenDecimals,
                                     'confirmations'  => $confirmations,
                                     'status'         => $status,
                                     'is_credited'    => false,
                                     'is_swept'       => false,
                                 ]);
 
-                                $this->info("✓ " . ($isFinal ? "Confirmed" : "Detected") . " deposit on [{$network}]: {$amountDecimal} {$tokenSymbol} on {$wallet->address} (Tx: {$txHash}, Confs: {$confirmations})");
+                                $this->info("✓ " . ($isFinal ? "Confirmed" : "Detected") . " deposit on [{$network}]: {$amountDecimal} {$tokenSymbol} on {$wallet->address} (Tx: {$txHash}#{$logIndex}, Confs: {$confirmations})");
 
                                 if ($isFinal) {
                                     event(new DepositConfirmed($deposit));
@@ -165,23 +180,35 @@ class MonitorCommand extends Command
                         $txHash = $transfer['tx_hash'];
                         if (empty($txHash)) continue;
 
+                        $logIndex      = (int)($transfer['log_index'] ?? 0);
+                        $blockNumber   = isset($transfer['block_number']) ? (int)$transfer['block_number'] : null;
                         $fromAddress   = $transfer['from_address'] ?? null;
-                        $amountDecimal = $transfer['amount'] ?? '0.00000000';
-                        $confirmations = $transfer['confirmations'] ?? 1;
+                        $amountRaw     = (string)($transfer['amount_raw'] ?? '0');
+                        $amountDecimal = (string)($transfer['amount'] ?? '0.00000000');
+                        $confirmations = (int)($transfer['confirmations'] ?? 1);
                         $isFinal       = $confirmations >= $requiredConfirmations;
                         $status        = $isFinal ? 'confirmed' : 'pending';
 
-                        $existing = $depositModel::where('tx_hash', $txHash)->first();
+                        $existing = $depositModel::where('network', $network)
+                            ->where('tx_hash', $txHash)
+                            ->where('log_index', $logIndex)
+                            ->first();
 
-                        if (!$existing && (float)$amountDecimal > 0.0001) {
+                        // Native dust threshold: 0.0001 ETH/BNB (100,000,000,000,000 wei) via arbitrary-precision check
+                        if (!$existing && bccomp($amountRaw, '100000000000000') > 0) {
                             $deposit = $depositModel::create([
                                 'wallet_id'      => $wallet->id,
                                 'network'        => $network,
+                                'tx_hash'        => $txHash,
+                                'log_index'      => $logIndex,
+                                'block_number'   => $blockNumber,
                                 'from_address'   => $fromAddress,
                                 'to_address'     => $wallet->address,
                                 'token_symbol'   => 'NATIVE',
                                 'token_contract' => null,
+                                'amount_raw'     => $amountRaw,
                                 'amount'         => $amountDecimal,
+                                'decimals'       => 18,
                                 'confirmations'  => $confirmations,
                                 'status'         => $status,
                                 'is_credited'    => false,
