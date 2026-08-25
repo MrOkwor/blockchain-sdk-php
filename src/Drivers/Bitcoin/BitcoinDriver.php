@@ -22,7 +22,12 @@ class BitcoinDriver implements NetworkDriverInterface
         $this->generator = new BitcoinWalletGenerator();
         $this->signer = new BitcoinTransactionSigner();
         $this->rpcNodes = $config['rpc_nodes'] ?? ['https://blockstream.info/api', 'https://mempool.space/api'];
-        $this->rpc = new RpcClient($this->rpcNodes);
+        $this->rpc = new RpcClient(
+            $this->rpcNodes,
+            10,
+            [],
+            $config['verify'] ?? true
+        );
     }
 
     public function generateWallet(): Keypair

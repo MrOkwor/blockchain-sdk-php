@@ -19,7 +19,12 @@ class SolanaDriver implements NetworkDriverInterface
     {
         $this->generator = new SolanaWalletGenerator();
         $this->signer = new SolanaTransactionSigner();
-        $this->rpc = new RpcClient($config['rpc_nodes'] ?? ['https://api.mainnet-beta.solana.com', 'https://solana-mainnet.rpc.extrnode.com']);
+        $this->rpc = new RpcClient(
+            $config['rpc_nodes'] ?? ['https://api.mainnet-beta.solana.com', 'https://solana-mainnet.rpc.extrnode.com'],
+            10,
+            [],
+            $config['verify'] ?? true
+        );
     }
 
     public function generateWallet(): Keypair

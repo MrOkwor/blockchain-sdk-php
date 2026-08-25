@@ -46,6 +46,11 @@ class BlockchainServiceProvider extends ServiceProvider
                 __DIR__ . '/../../database/migrations/create_blockchainsdk_sweeps_table.php.stub' => database_path('migrations/' . date('Y_m_d_His', time() + 2) . '_create_blockchainsdk_sweeps_table.php'),
             ], 'blockchainsdk-migrations');
 
+            // Publish Database Upgrade Migrations for existing installations
+            $this->publishes([
+                __DIR__ . '/../../database/migrations/add_accounting_columns_to_blockchainsdk_deposits_table.php.stub' => database_path('migrations/' . date('Y_m_d_His', time()) . '_add_accounting_columns_to_blockchainsdk_deposits_table.php'),
+            ], 'blockchainsdk-upgrade-migrations');
+
             // Publish Eloquent Models to app/Models/
             $this->publishes([
                 __DIR__ . '/../../stubs/BlockchainSdkWallet.stub'  => app_path('Models/BlockchainSdkWallet.php'),

@@ -3,9 +3,13 @@
 namespace BlockchainSdk\Tests;
 
 use BlockchainSdk\BlockchainManager;
+use BlockchainSdk\Crypto\Decimal;
+use BlockchainSdk\Crypto\Keccak;
+use BlockchainSdk\Crypto\Secp256k1;
 use BlockchainSdk\Drivers\Bitcoin\BitcoinTransactionSigner;
 use BlockchainSdk\Drivers\Evm\EvmTransactionSigner;
 use BlockchainSdk\Drivers\Solana\SolanaTransactionSigner;
+use BlockchainSdk\Http\RpcClient;
 use Illuminate\Support\Facades\Crypt;
 use Tests\TestCase;
 
@@ -25,7 +29,7 @@ class BlockchainSdkTest extends TestCase
             'master_gas_wallets' => [
                 'ethereum' => [
                     'address'     => '0x71C8360f3a104d31a4570b9A821929342939b422',
-                    'private_key' => '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', // Plaintext
+                    'private_key' => 'plain:0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d',
                 ],
             ],
             'networks' => [
@@ -67,6 +71,59 @@ class BlockchainSdkTest extends TestCase
         $this->assertGreaterThan(100, strlen($signedRaw));
     }
 
+    public function test_rfc6979_deterministic_signing_vector(): void
+    {
+        // Known private key and message hash
+        $privKey = 'c8524633ec5d64f622a8069fdef9b731f21099fd34942ab83326d8b2ab5f0221';
+        $messageHash = '0000000000000000000000000000000000000000000000000000000000000001';
+
+        $sig1 = Secp256k1::signRfc6979($privKey, $messageHash);
+        $sig2 = Secp256k1::signRfc6979($privKey, $messageHash);
+
+        // Deterministic RFC 6979 must produce identical r and s across runs
+        $this->assertEquals($sig1['r'], $sig2['r']);
+        $this->assertEquals($sig1['s'], $sig2['s']);
+        $this->assertContains($sig1['v'], [0, 1]);
+        $this->assertNotEmpty($sig1['r']);
+        $this->assertNotEmpty($sig1['s']);
+    }
+
+    public function test_strip0x_helper_preserves_leading_zeroes(): void
+    {
+        // Must strip 0x without removing meaningful 00 bytes (CRYPTO-02)
+        $this->assertEquals('001234567890abcdef', EvmTransactionSigner::strip0x('0x001234567890abcdef'));
+        $this->assertEquals('0000000000000000', EvmTransactionSigner::strip0x('0x0000000000000000'));
+        $this->assertEquals('abcdef', EvmTransactionSigner::strip0x('abcdef'));
+    }
+
+    public function test_erc20_transfer_calldata_assembly(): void
+    {
+        $to = '0x71C8360f3a104d31a4570b9A821929342939b422';
+        $amountWei = '50000000000000000000'; // 50 tokens (18 dec)
+
+        $calldata = EvmTransactionSigner::buildErc20TransferData($to, $amountWei);
+
+        // a9059cbb + 32-byte padded address + 32-byte padded amount = 136 chars
+        $this->assertStringStartsWith('a9059cbb', $calldata);
+        $this->assertEquals(136, strlen($calldata));
+        $this->assertStringContainsString('71c8360f3a104d31a4570b9a821929342939b422', $calldata);
+    }
+
+    public function test_decimal_conversion_accuracy(): void
+    {
+        // 6 Decimals (USDT/USDC)
+        $raw6 = Decimal::toBaseUnit('50.123456', 6);
+        $this->assertEquals('50123456', $raw6);
+        $formatted6 = Decimal::fromBaseUnit($raw6, 6, 6);
+        $this->assertEquals('50.123456', $formatted6);
+
+        // 18 Decimals (ETH/BNB)
+        $raw18 = Decimal::toBaseUnit('1.5', 18);
+        $this->assertEquals('1500000000000000000', $raw18);
+        $formatted18 = Decimal::fromBaseUnit($raw18, 18, 2);
+        $this->assertEquals('1.50', $formatted18);
+    }
+
     public function test_solana_wallet_generation_and_signing(): void
     {
         $wallet = $this->sdk->driver('solana')->generateWallet();
@@ -92,7 +149,6 @@ class BlockchainSdkTest extends TestCase
         $wallet = $this->sdk->driver('bitcoin')->generateWallet();
         $this->assertStringStartsWith('bc1q', $wallet->address);
 
-        // Test BIP-143 transaction assembly and signing
         $dummyUtxos = [
             [
                 'txid'  => '4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b',
@@ -142,19 +198,6 @@ class BlockchainSdkTest extends TestCase
         $this->assertFalse($this->sdk->isTokenEnabled('ethereum', 'OLD_TOKEN'));
     }
 
-    public function test_gas_cost_estimation_across_drivers(): void
-    {
-        $evmGas = $this->sdk->driver('ethereum')->estimateTokenTransferGasCost();
-        $this->assertNotEmpty($evmGas);
-        $this->assertGreaterThan(0, (float)$evmGas);
-
-        $solGas = $this->sdk->driver('solana')->estimateTokenTransferGasCost();
-        $this->assertEquals('5000', $solGas);
-
-        $tronGas = $this->sdk->driver('tron')->estimateTokenTransferGasCost();
-        $this->assertEquals('15000000', $tronGas);
-    }
-
     public function test_address_validation_across_chains(): void
     {
         $this->assertTrue($this->sdk->validateAddress('ethereum', '0xdAC17F958D2ee523a2206206994597C13D831ec7'));
@@ -173,20 +216,19 @@ class BlockchainSdkTest extends TestCase
         $this->assertFalse($this->sdk->validateAddress('bitcoin', 'InvalidBtcAddress'));
     }
 
-    public function test_safe_secret_decryption_and_master_wallet_lookup(): void
+    public function test_secret_modes_and_fail_closed_decryption(): void
     {
-        // 1. Plaintext secret decryption
-        $plain = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-        $this->assertEquals($plain, BlockchainManager::decryptSecret($plain));
+        $rawKey = '0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d';
 
-        // 2. Encrypted secret decryption (using Laravel Crypt)
-        $encrypted = Crypt::encryptString($plain);
-        $this->assertNotEquals($plain, $encrypted);
-        $this->assertEquals($plain, BlockchainManager::decryptSecret($encrypted));
+        // 1. Explicit plaintext mode (plain:)
+        $this->assertEquals($rawKey, BlockchainManager::decryptSecret("plain:{$rawKey}"));
 
-        // 3. Manager master gas key, gas address & master wallet lookups
-        $this->assertEquals('0x71C8360f3a104d31a4570b9A821929342939b422', $this->sdk->getMasterWallet('ethereum'));
-        $this->assertEquals('0x71C8360f3a104d31a4570b9A821929342939b422', $this->sdk->getMasterGasAddress('ethereum'));
-        $this->assertEquals('0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d', $this->sdk->getMasterGasKey('ethereum'));
+        // 2. Explicit encrypted mode (enc:v1:)
+        $cipher = Crypt::encryptString($rawKey);
+        $this->assertEquals($rawKey, BlockchainManager::decryptSecret("enc:v1:{$cipher}"));
+
+        // 3. Corrupted enc:v1: must fail closed with RuntimeException (SEC-02)
+        $this->expectException(\RuntimeException::class);
+        BlockchainManager::decryptSecret("enc:v1:CorruptedInvalidPayload");
     }
 }

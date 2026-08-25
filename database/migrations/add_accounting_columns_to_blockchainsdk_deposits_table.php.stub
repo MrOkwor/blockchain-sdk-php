@@ -1,0 +1,42 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        if (Schema::hasTable('blockchainsdk_deposits')) {
+            Schema::table('blockchainsdk_deposits', function (Blueprint $table) {
+                if (!Schema::hasColumn('blockchainsdk_deposits', 'log_index')) {
+                    $table->integer('log_index')->default(0)->after('tx_hash');
+                }
+                if (!Schema::hasColumn('blockchainsdk_deposits', 'block_number')) {
+                    $table->unsignedBigInteger('block_number')->nullable()->after('log_index');
+                }
+                if (!Schema::hasColumn('blockchainsdk_deposits', 'amount_raw')) {
+                    $table->string('amount_raw', 78)->nullable()->after('token_contract');
+                }
+                if (!Schema::hasColumn('blockchainsdk_deposits', 'decimals')) {
+                    $table->integer('decimals')->default(18)->after('amount');
+                }
+            });
+        }
+    }
+
+    public function down(): void
+    {
+        if (Schema::hasTable('blockchainsdk_deposits')) {
+            Schema::table('blockchainsdk_deposits', function (Blueprint $table) {
+                $columns = ['log_index', 'block_number', 'amount_raw', 'decimals'];
+                foreach ($columns as $column) {
+                    if (Schema::hasColumn('blockchainsdk_deposits', $column)) {
+                        $table->dropColumn($column);
+                    }
+                }
+            });
+        }
+    }
+};

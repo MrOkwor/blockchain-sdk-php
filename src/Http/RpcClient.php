@@ -11,12 +11,16 @@ class RpcClient
     private array $nodes;
     private int $currentNodeIndex = 0;
 
-    public function __construct(array $nodes, int $timeout = 10, array $headers = [])
-    {
+    public function __construct(
+        array $nodes, 
+        int $timeout = 10, 
+        array $headers = [],
+        bool|string $verify = true
+    ) {
         $this->nodes = !empty($nodes) ? array_values($nodes) : ['http://localhost:8545'];
         $this->httpClient = new Client([
             'timeout' => $timeout,
-            'verify'  => false,
+            'verify'  => $verify,
             'headers' => array_merge(['Content-Type' => 'application/json'], $headers),
         ]);
     }

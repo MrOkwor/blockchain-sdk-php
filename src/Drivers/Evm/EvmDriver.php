@@ -20,7 +20,12 @@ class EvmDriver implements NetworkDriverInterface
     {
         $this->generator = new EvmWalletGenerator();
         $this->signer = new EvmTransactionSigner();
-        $this->rpc = new RpcClient($config['rpc_nodes'] ?? ['https://cloudflare-eth.com']);
+        $this->rpc = new RpcClient(
+            $config['rpc_nodes'] ?? ['https://cloudflare-eth.com'],
+            10,
+            [],
+            $config['verify'] ?? true
+        );
         $this->chainId = (int)($config['chain_id'] ?? 1);
         $this->currency = $config['currency'] ?? 'ETH';
     }
@@ -83,6 +88,26 @@ class EvmDriver implements NetworkDriverInterface
         return new TokenBalance($this->currency, $wei, bcdiv($wei, '1000000000000000000', 6), 18);
     }
 
+    private static array $allocatedNonces = [];
+
+    public function getNextNonce(string $address): int
+    {
+        $res = $this->rpc->call('eth_getTransactionCount', [$address, 'pending']);
+        $onChainNonce = hexdec($res['result'] ?? '0x0');
+
+        $addressKey = strtolower($address);
+        $localNonce = self::$allocatedNonces[$addressKey] ?? -1;
+
+        if ($localNonce >= $onChainNonce) {
+            $nextNonce = $localNonce + 1;
+        } else {
+            $nextNonce = $onChainNonce;
+        }
+
+        self::$allocatedNonces[$addressKey] = $nextNonce;
+        return $nextNonce;
+    }
+
     public function sendTransaction(array $params): TransactionResult
     {
         $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
@@ -90,13 +115,10 @@ class EvmDriver implements NetworkDriverInterface
         $params['from_private_key'] = $fromPrivateKey;
         $params['private_key'] = $fromPrivateKey;
         
-        $nonceRes = $this->rpc->call('eth_getTransactionCount', [$from, 'pending']);
-        $nonce = hexdec($nonceRes['result'] ?? '0x0');
+        $params['nonce'] = $params['nonce'] ?? $this->getNextNonce($from);
 
         $gasPriceRes = $this->rpc->call('eth_gasPrice', []);
         $gasPriceWei = gmp_strval(gmp_init($gasPriceRes['result'] ?? '0x4a817c800', 16), 10);
-
-        $params['nonce'] = $params['nonce'] ?? $nonce;
         $params['gas_price'] = $params['gas_price'] ?? $gasPriceWei;
 
         $tokenContract = $params['token_contract'] ?? null;
@@ -111,7 +133,7 @@ class EvmDriver implements NetworkDriverInterface
             $params['value'] = \BlockchainSdk\Crypto\Decimal::toBaseUnit($params['amount'], 18);
         }
 
-        // Dynamically estimate gas limit with eth_estimateGas to support smart contracts, EIP-7702, and EOAs
+        // Strict gas estimation with revert detection
         if (!isset($params['gas_limit'])) {
             try {
                 $estimateParams = [
@@ -125,14 +147,17 @@ class EvmDriver implements NetworkDriverInterface
                 $estRes = $this->rpc->call('eth_estimateGas', [$estimateParams]);
                 $estimatedGas = hexdec($estRes['result'] ?? '0x0');
                 if ($estimatedGas > 0) {
-                    $params['gas_limit'] = max((int)($estimatedGas * 1.25), 21000);
+                    $params['gas_limit'] = min((int)($estimatedGas * 1.20), 500000);
                 }
             } catch (\Throwable $e) {
-                // Fallback safe default
-            }
+                $msg = strtolower($e->getMessage());
+                // Fail closed on contract execution reverts to prevent burning gas fees
+                if (str_contains($msg, 'revert') || str_contains($msg, 'insufficient') || str_contains($msg, 'exceeds balance') || str_contains($msg, 'allowance')) {
+                    return new TransactionResult(false, null, null, "Transaction execution rejected: " . $e->getMessage());
+                }
 
-            if (!isset($params['gas_limit'])) {
-                $params['gas_limit'] = !empty($params['data']) ? 65000 : 35000;
+                // Fallback for node transport errors
+                $params['gas_limit'] = !empty($params['data']) ? 80000 : 21000;
             }
         }
 
@@ -226,6 +251,38 @@ class EvmDriver implements NetworkDriverInterface
         ]);
     }
 
+    public function waitForTransactionReceipt(string $txHash, ?int $timeoutSeconds = null): ?array
+    {
+        $timeout = $timeoutSeconds ?? match($this->chainId) {
+            56, 137, 8453, 42161, 10 => 15, // Fast L2s & BSC: 15s ceiling (resolves in ~2-3s)
+            default                  => 30, // Ethereum L1: 30s ceiling
+        };
+
+        $startTime = time();
+        while ((time() - $startTime) < $timeout) {
+            try {
+                $res = $this->rpc->call('eth_getTransactionReceipt', [$txHash]);
+                $receipt = $res['result'] ?? null;
+                if (!empty($receipt) && is_array($receipt)) {
+                    $status = $receipt['status'] ?? '0x1';
+                    if ($status === '0x1' || $status === '1' || $status === 1) {
+                        return $receipt;
+                    } elseif ($status === '0x0' || $status === '0' || $status === 0) {
+                        throw new \RuntimeException("Transaction {$txHash} reverted on-chain.");
+                    }
+                    return $receipt;
+                }
+            } catch (\Throwable $e) {
+                if (str_contains($e->getMessage(), 'reverted')) {
+                    throw $e;
+                }
+            }
+            usleep(1000000); // Poll every 1 second
+        }
+
+        return null;
+    }
+
     public function sweepTokenWithGasSponsorship(string $subWalletPrivateKey, string $masterGasPrivateKey, string $toVaultAddress, string $tokenContract, ?string $amount = null): TransactionResult
     {
         $fromAddress = $this->generator->privateKeyToAddress($subWalletPrivateKey);
@@ -236,7 +293,25 @@ class EvmDriver implements NetworkDriverInterface
             return new TransactionResult(false, null, null, "Failed to fuel sub-wallet with gas: " . ($fuelResult->errorMessage ?? 'Unknown error'));
         }
 
-        // 2. Execute ERC-20 token sweep
+        // 2. If gas funding was broadcast, wait for on-chain receipt before sweeping
+        if (!empty($fuelResult->txHash)) {
+            try {
+                $receipt = $this->waitForTransactionReceipt($fuelResult->txHash);
+                if (!$receipt) {
+                    return new TransactionResult(false, null, null, "Gas funding tx {$fuelResult->txHash} timed out waiting for on-chain receipt.");
+                }
+            } catch (\Throwable $e) {
+                return new TransactionResult(false, null, null, "Gas funding failed: " . $e->getMessage());
+            }
+        }
+
+        // 3. Verify sub-wallet has enough gas balance to execute the ERC-20 transfer
+        $gasBalanceWei = $this->getBalance($fromAddress)->balanceRaw;
+        if (bccomp($gasBalanceWei, '0') <= 0) {
+            return new TransactionResult(false, null, null, "Sub-wallet gas balance is 0 after funding attempt.");
+        }
+
+        // 4. Execute ERC-20 token sweep
         return $this->sweep($subWalletPrivateKey, $toVaultAddress, $tokenContract, $amount);
     }
 
@@ -256,10 +331,26 @@ class EvmDriver implements NetworkDriverInterface
         }
     }
 
-    public function getLatestIncomingTransaction(string $address, ?string $tokenContract = null): ?array
+    public function getLatestIncomingTransaction(string $address, ?string $tokenContract = null, int $decimals = 18): ?array
     {
+        $transfers = $this->getIncomingTransactions($address, $tokenContract, $decimals, 1);
+        return $transfers[0] ?? null;
+    }
+
+    /**
+     * Retrieve incoming transfer events with exact amounts, base units, log indices, and confirmations.
+     *
+     * @return array<int, array{tx_hash: string, log_index: int, block_number: int, from_address: ?string, to_address: string, amount_raw: string, amount: string, decimals: int, confirmations: int}>
+     */
+    public function getIncomingTransactions(string $address, ?string $tokenContract = null, int $decimals = 18, int $limit = 10): array
+    {
+        $results = [];
+
         try {
-            // 1. Direct Explorer API Fallback (Blockscout, Bscscan / Etherscan public APIs)
+            $currentBlockHex = $this->rpc->call('eth_blockNumber', [])['result'] ?? null;
+            $currentBlock = $currentBlockHex ? hexdec($currentBlockHex) : 0;
+
+            // 1. Direct Explorer API (Blockscout)
             $blockscoutHosts = [
                 1      => 'eth.blockscout.com',
                 10     => 'optimism.blockscout.com',
@@ -287,11 +378,32 @@ class EvmDriver implements NetworkDriverInterface
                                 if (!$tokenContract || $itemContract === strtolower($tokenContract)) {
                                     $txHash = $item['transaction_hash'] ?? null;
                                     $from = $item['from']['hash'] ?? null;
+                                    $rawVal = (string)($item['total']['value'] ?? '0');
+                                    $itemDecimals = (int)($item['token']['decimals'] ?? $decimals);
+                                    $blockNumber = (int)($item['block_number'] ?? $currentBlock);
+                                    $logIndex = (int)($item['log_index'] ?? 0);
+                                    $confirmations = $currentBlock && $blockNumber ? max(1, $currentBlock - $blockNumber + 1) : 1;
+
                                     if ($txHash) {
-                                        return [
-                                            'tx_hash'      => $txHash,
-                                            'from_address' => $from,
+                                        $formatted = bcpow('10', $itemDecimals) !== '0' 
+                                            ? bcdiv($rawVal, bcpow('10', $itemDecimals), 8) 
+                                            : '0';
+
+                                        $results[] = [
+                                            'tx_hash'       => $txHash,
+                                            'log_index'     => $logIndex,
+                                            'block_number'  => $blockNumber,
+                                            'from_address'  => $from,
+                                            'to_address'    => $address,
+                                            'amount_raw'    => $rawVal,
+                                            'amount'        => $formatted,
+                                            'decimals'      => $itemDecimals,
+                                            'confirmations' => $confirmations,
                                         ];
+
+                                        if (count($results) >= $limit) {
+                                            return $results;
+                                        }
                                     }
                                 }
                             }
@@ -305,54 +417,87 @@ class EvmDriver implements NetworkDriverInterface
                         foreach ($data['items'] ?? [] as $item) {
                             $to = strtolower($item['to']['hash'] ?? '');
                             if ($to === strtolower($address) && ($item['status'] ?? '') === 'ok') {
-                                return [
-                                    'tx_hash'      => $item['hash'] ?? null,
-                                    'from_address' => $item['from']['hash'] ?? null,
+                                $rawVal = (string)($item['value'] ?? '0');
+                                $blockNumber = (int)($item['block_number'] ?? $currentBlock);
+                                $confirmations = $currentBlock && $blockNumber ? max(1, $currentBlock - $blockNumber + 1) : 1;
+
+                                $formatted = bcdiv($rawVal, bcpow('10', 18), 8);
+
+                                $results[] = [
+                                    'tx_hash'       => $item['hash'] ?? '',
+                                    'log_index'     => 0,
+                                    'block_number'  => $blockNumber,
+                                    'from_address'  => $item['from']['hash'] ?? null,
+                                    'to_address'    => $address,
+                                    'amount_raw'    => $rawVal,
+                                    'amount'        => $formatted,
+                                    'decimals'      => 18,
+                                    'confirmations' => $confirmations,
                                 ];
+
+                                if (count($results) >= $limit) {
+                                    return $results;
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // 2. RPC-based eth_getLogs for ERC-20 tokens (query 2,000 blocks back)
-            if ($tokenContract) {
-                $currentBlockHex = $this->rpc->call('eth_blockNumber', [])['result'] ?? null;
-                if ($currentBlockHex) {
-                    $currentBlock = hexdec($currentBlockHex);
-                    $transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-                    $paddedAddress = '0x' . str_pad(substr(strtolower($address), 2), 64, '0', STR_PAD_LEFT);
+            // 2. RPC-based eth_getLogs for ERC-20 tokens
+            if ($tokenContract && empty($results) && $currentBlock > 0) {
+                $transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+                $paddedAddress = '0x' . str_pad(substr(strtolower($address), 2), 64, '0', STR_PAD_LEFT);
+                $fromBlock = max(0, $currentBlock - 2000);
 
-                    $fromBlock = max(0, $currentBlock - 2000);
+                $res = $this->rpc->call('eth_getLogs', [[
+                    'fromBlock' => '0x' . dechex($fromBlock),
+                    'toBlock'   => '0x' . dechex($currentBlock),
+                    'address'   => $tokenContract,
+                    'topics'    => [$transferTopic, null, $paddedAddress],
+                ]]);
 
-                    $res = $this->rpc->call('eth_getLogs', [[
-                        'fromBlock' => '0x' . dechex($fromBlock),
-                        'toBlock'   => '0x' . dechex($currentBlock),
-                        'address'   => $tokenContract,
-                        'topics'    => [$transferTopic, null, $paddedAddress],
-                    ]]);
+                $logs = $res['result'] ?? [];
+                if (!empty($logs) && is_array($logs)) {
+                    foreach (array_reverse($logs) as $log) {
+                        $txHash = $log['transactionHash'] ?? null;
+                        if (!$txHash) continue;
 
-                    $logs = $res['result'] ?? [];
-                    if (!empty($logs) && is_array($logs)) {
-                        $lastLog = end($logs);
-                        $txHash = $lastLog['transactionHash'] ?? null;
-                        $fromTopic = $lastLog['topics'][1] ?? null;
+                        $fromTopic = $log['topics'][1] ?? null;
                         $fromAddress = $fromTopic ? ('0x' . substr($fromTopic, 26)) : null;
+                        $rawHex = $log['data'] ?? '0x0';
+                        $rawVal = gmp_strval(gmp_init($rawHex, 16), 10);
+                        $blockNumber = hexdec($log['blockNumber'] ?? '0x0');
+                        $logIndex = hexdec($log['logIndex'] ?? '0x0');
+                        $confirmations = max(1, $currentBlock - $blockNumber + 1);
 
-                        if ($txHash) {
-                            return [
-                                'tx_hash'      => $txHash,
-                                'from_address' => $fromAddress,
-                            ];
+                        $formatted = bcpow('10', $decimals) !== '0' 
+                            ? bcdiv($rawVal, bcpow('10', $decimals), 8) 
+                            : '0';
+
+                        $results[] = [
+                            'tx_hash'       => $txHash,
+                            'log_index'     => $logIndex,
+                            'block_number'  => $blockNumber,
+                            'from_address'  => $fromAddress,
+                            'to_address'    => $address,
+                            'amount_raw'    => $rawVal,
+                            'amount'        => $formatted,
+                            'decimals'      => $decimals,
+                            'confirmations' => $confirmations,
+                        ];
+
+                        if (count($results) >= $limit) {
+                            return $results;
                         }
                     }
                 }
             }
         } catch (\Throwable $e) {
-            // Silently fallback
+            // Graceful fallback
         }
 
-        return null;
+        return $results;
     }
 
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string

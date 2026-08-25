@@ -112,7 +112,20 @@ class SweepCommand extends Command
                 }
 
                 if ($result->success && !empty($result->txHash)) {
-                    $this->info("✓ Swept successfully! TxHash: {$result->txHash}");
+                    $this->info("✓ Sweep broadcasted! TxHash: {$result->txHash}");
+
+                    // Confirm on-chain receipt if supported
+                    if (method_exists($driver, 'waitForTransactionReceipt')) {
+                        $this->line("Waiting for on-chain sweep confirmation...");
+                        try {
+                            $receipt = $driver->waitForTransactionReceipt($result->txHash);
+                            if ($receipt) {
+                                $this->info("✓ Sweep confirmed on-chain in block #" . hexdec($receipt['blockNumber'] ?? '0x0'));
+                            }
+                        } catch (\Throwable $e) {
+                            $this->warn("Sweep receipt check notice: " . $e->getMessage());
+                        }
+                    }
 
                     $sweepRecord = $sweepModel::create([
                         'wallet_id'        => $wallet->id,

@@ -81,6 +81,30 @@ class Secp256k1
 
     public static function signRfc6979(string $privHex, string $hashHex): array
     {
+        // 1. If ext-secp256k1 is loaded in high-security custodial environments, leverage C library
+        if (function_exists('secp256k1_context_create') && function_exists('secp256k1_ecdsa_sign_recoverable')) {
+            try {
+                $ctx = secp256k1_context_create(1); // SECP256K1_CONTEXT_SIGN
+                $msg32 = hex2bin(str_pad($hashHex, 64, '0', STR_PAD_LEFT));
+                $priv32 = hex2bin(str_pad($privHex, 64, '0', STR_PAD_LEFT));
+                $recSig = '';
+                if (secp256k1_ecdsa_sign_recoverable($ctx, $recSig, $msg32, $priv32)) {
+                    $serialized = '';
+                    $recId = 0;
+                    if (secp256k1_ecdsa_recoverable_signature_serialize_compact($ctx, $recSig, $serialized, $recId)) {
+                        return [
+                            'r' => bin2hex(substr($serialized, 0, 32)),
+                            's' => bin2hex(substr($serialized, 32, 32)),
+                            'v' => $recId,
+                        ];
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Fallback to pure-PHP implementation
+            }
+        }
+
+        // 2. Pure PHP portable implementation with GMP
         $n = gmp_init(self::N_HEX, 16);
         $p = gmp_init(self::P_HEX, 16);
         $gx = gmp_init(self::GX_HEX, 16);

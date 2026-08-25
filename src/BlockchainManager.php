@@ -73,17 +73,37 @@ class BlockchainManager
             return null;
         }
 
-        // If Laravel Crypt facade is available, attempt safe decryption
+        $trimmed = trim($value);
+
+        // 1. Explicit plaintext mode
+        if (str_starts_with($trimmed, 'plain:')) {
+            return substr($trimmed, 6);
+        }
+
+        // 2. Explicit encrypted mode (enc:v1: or enc:) - Fail closed on corruption
+        if (str_starts_with($trimmed, 'enc:v1:') || str_starts_with($trimmed, 'enc:')) {
+            $ciphertext = str_starts_with($trimmed, 'enc:v1:') ? substr($trimmed, 7) : substr($trimmed, 4);
+            if (class_exists(\Illuminate\Support\Facades\Crypt::class)) {
+                try {
+                    return \Illuminate\Support\Facades\Crypt::decryptString($ciphertext);
+                } catch (\Throwable $e) {
+                    throw new \RuntimeException("Failed to decrypt encrypted private key: " . $e->getMessage());
+                }
+            }
+            throw new \RuntimeException("Cannot decrypt secret: Laravel Crypt service is not available.");
+        }
+
+        // 3. Backward-compatible fallback for legacy unprefixed keys
         if (class_exists(\Illuminate\Support\Facades\Crypt::class)) {
             try {
-                return \Illuminate\Support\Facades\Crypt::decryptString($value);
+                return \Illuminate\Support\Facades\Crypt::decryptString($trimmed);
             } catch (\Throwable $e) {
                 // Not encrypted or already plaintext
-                return $value;
+                return $trimmed;
             }
         }
 
-        return $value;
+        return $trimmed;
     }
 
     public function getAvailableNetworks(): array

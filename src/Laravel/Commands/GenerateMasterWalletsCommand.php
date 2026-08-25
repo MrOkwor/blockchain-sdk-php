@@ -38,7 +38,7 @@ class GenerateMasterWalletsCommand extends Command
         }
 
         $this->info("=== Blockchain SDK Master & Gas Wallet Generator ===");
-        $this->line("Mode: <fg=yellow>" . ($shouldEncrypt ? 'Encrypted (AES-256)' : 'Plaintext') . "</>");
+        $this->line("Mode: <fg=yellow>" . ($shouldEncrypt ? 'Encrypted (AES-256 with enc:v1: prefix)' : 'Plaintext (plain: prefix)') . "</>");
         $this->line("Storage: <fg=yellow>" . ($shouldStore ? '.env file' : 'Console output only') . "</>\n");
 
         $masterRows = [];
@@ -52,7 +52,7 @@ class GenerateMasterWalletsCommand extends Command
             $address = $keypair->address;
             $rawPrivKey = $keypair->privateKey;
 
-            $storedPrivKey = $shouldEncrypt ? Crypt::encryptString($rawPrivKey) : $rawPrivKey;
+            $storedPrivKey = $shouldEncrypt ? ('enc:v1:' . Crypt::encryptString($rawPrivKey)) : ('plain:' . $rawPrivKey);
 
             // 1. Master Cold Vault block
             $masterKey = 'BLOCKCHAIN_MASTER_' . strtoupper($network);
@@ -69,7 +69,7 @@ class GenerateMasterWalletsCommand extends Command
             $gasRows[] = [
                 ucfirst($network),
                 $address,
-                $shouldEncrypt ? (substr($storedPrivKey, 0, 18) . '...[ENCRYPTED]') : (substr($rawPrivKey, 0, 10) . '...'),
+                $shouldEncrypt ? ('enc:v1:' . substr($storedPrivKey, 7, 18) . '...[ENCRYPTED]') : (substr($rawPrivKey, 0, 10) . '...'),
             ];
 
             $gasEnvUpdates[$gasAddressKey] = $address;
@@ -126,10 +126,22 @@ class GenerateMasterWalletsCommand extends Command
             }
 
             foreach ($gasEnvUpdates as $key => $value) {
-                if (preg_match("/^{$key}=.*/m", $envContent)) {
+                if (preg_match("/^{$key}=\"?(.*?)\"?\s*$/m", $envContent, $matches)) {
+                    $existingVal = $matches[1] ?? '';
                     if ($force) {
                         $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$value}\"", $envContent);
                         $modified = true;
+                    } elseif (!empty($existingVal) && !str_starts_with($existingVal, 'enc:') && !str_starts_with($existingVal, 'plain:')) {
+                        // Normalize legacy unprefixed key: test if decryptable
+                        try {
+                            Crypt::decryptString($existingVal);
+                            $normalizedVal = "enc:v1:{$existingVal}";
+                        } catch (\Throwable $e) {
+                            $normalizedVal = "plain:{$existingVal}";
+                        }
+                        $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$normalizedVal}\"", $envContent);
+                        $modified = true;
+                        $this->line("Prefixed existing key {$key} with " . (str_starts_with($normalizedVal, 'enc:') ? '<fg=green>enc:v1:</>' : '<fg=yellow>plain:</>'));
                     }
                 } else {
                     $envContent .= "\n{$key}=\"{$value}\"";

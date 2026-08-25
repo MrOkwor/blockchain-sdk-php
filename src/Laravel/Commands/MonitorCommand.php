@@ -3,6 +3,7 @@
 namespace BlockchainSdk\Laravel\Commands;
 
 use BlockchainSdk\Laravel\Events\DepositConfirmed;
+use BlockchainSdk\Laravel\Events\DepositDetected;
 use BlockchainSdk\Laravel\Facades\Blockchain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -55,35 +56,75 @@ class MonitorCommand extends Command
                 ? [Blockchain::findToken($network, $tokenInput, true)]
                 : Blockchain::getSupportedTokens($network, true);
 
+            $requiredConfirmations = (int)config("blockchainsdk.confirmations.{$network}", match($network) {
+                'ethereum' => 12,
+                'polygon'  => 5,
+                'bsc'      => 3,
+                'tron'     => 19,
+                'bitcoin'  => 2,
+                default    => 1,
+            });
+
+            // 1. Process pending unconfirmed deposits first to advance their confirmations
+            $pendingDeposits = $depositModel::where('network', $network)
+                ->where('status', 'pending')
+                ->get();
+
+            foreach ($pendingDeposits as $pendingDeposit) {
+                try {
+                    $transfers = method_exists($driver, 'getIncomingTransactions')
+                        ? $driver->getIncomingTransactions($pendingDeposit->to_address, $pendingDeposit->token_contract, (int)($pendingDeposit->decimals ?? 18), 5)
+                        : [];
+
+                    foreach ($transfers as $tx) {
+                        if ($tx['tx_hash'] === $pendingDeposit->tx_hash) {
+                            $confs = $tx['confirmations'] ?? 1;
+                            $pendingDeposit->confirmations = $confs;
+
+                            if ($confs >= $requiredConfirmations) {
+                                $pendingDeposit->status = 'confirmed';
+                                $pendingDeposit->save();
+                                $this->info("✓ Deposit reached finality on [{$network}]: {$pendingDeposit->amount} {$pendingDeposit->token_symbol} (Tx: {$pendingDeposit->tx_hash}, Confs: {$confs})");
+                                event(new DepositConfirmed($pendingDeposit));
+                            } else {
+                                $pendingDeposit->save();
+                            }
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("Error updating confirmations for deposit #{$pendingDeposit->id}: " . $e->getMessage());
+                }
+            }
+
+            // 2. Scan wallets for new transfer events
             foreach ($wallets as $wallet) {
-                // 1. Scan configured tokens
+                // A. Scan configured tokens
                 foreach ($tokens as $symKey => $token) {
                     if (!$token) continue;
 
                     $tokenContract = $token['contract'] ?? null;
                     $tokenSymbol   = !empty($token['symbol']) ? strtoupper($token['symbol']) : (is_string($symKey) ? strtoupper($symKey) : 'TOKEN');
+                    $tokenDecimals = (int)($token['decimals'] ?? 18);
 
                     try {
-                        $balance = $driver->getBalance($wallet->address, $tokenContract);
-                        $balanceAmount = (float)$balance->balanceFormatted;
+                        $incomingTransfers = method_exists($driver, 'getIncomingTransactions')
+                            ? $driver->getIncomingTransactions($wallet->address, $tokenContract, $tokenDecimals, 10)
+                            : [];
 
-                        if ($balanceAmount > 0) {
-                            $txDetails = method_exists($driver, 'getLatestIncomingTransaction')
-                                ? $driver->getLatestIncomingTransaction($wallet->address, $tokenContract)
-                                : null;
+                        foreach ($incomingTransfers as $transfer) {
+                            $txHash = $transfer['tx_hash'];
+                            if (empty($txHash)) continue;
 
-                            $txHash = $txDetails['tx_hash'] ?? $driver->getLatestIncomingTxHash($wallet->address, $tokenContract);
-                            $fromAddress = $txDetails['from_address'] ?? null;
-                            $finalTxHash = $txHash ?: ('detected_' . substr(md5($wallet->address . $tokenSymbol . time()), 0, 16));
+                            $fromAddress   = $transfer['from_address'] ?? null;
+                            $amountRaw     = $transfer['amount_raw'] ?? '0';
+                            $amountDecimal = $transfer['amount'] ?? '0.00000000';
+                            $confirmations = $transfer['confirmations'] ?? 1;
+                            $isFinal       = $confirmations >= $requiredConfirmations;
+                            $status        = $isFinal ? 'confirmed' : 'pending';
 
-                            $existing = $depositModel::where('tx_hash', $finalTxHash)
-                                ->orWhere(function ($q) use ($wallet, $tokenSymbol) {
-                                    $q->where('wallet_id', $wallet->id)
-                                      ->where('token_symbol', $tokenSymbol)
-                                      ->where('is_swept', false);
-                                })->first();
+                            $existing = $depositModel::where('tx_hash', $txHash)->first();
 
-                            if (!$existing) {
+                            if (!$existing && (float)$amountDecimal > 0) {
                                 $deposit = $depositModel::create([
                                     'wallet_id'      => $wallet->id,
                                     'network'        => $network,
@@ -91,15 +132,21 @@ class MonitorCommand extends Command
                                     'to_address'     => $wallet->address,
                                     'token_symbol'   => $tokenSymbol,
                                     'token_contract' => $tokenContract,
-                                    'amount'         => $balanceAmount,
-                                    'tx_hash'        => $finalTxHash,
-                                    'status'         => 'confirmed',
+                                    'amount'         => $amountDecimal,
+                                    'confirmations'  => $confirmations,
+                                    'status'         => $status,
                                     'is_credited'    => false,
                                     'is_swept'       => false,
                                 ]);
 
-                                $this->info("✓ Deposit detected on [{$network}]: {$balanceAmount} {$tokenSymbol} on {$wallet->address} (Tx: {$finalTxHash}, From: " . ($fromAddress ?? 'Unknown') . ")");
-                                event(new DepositConfirmed($deposit));
+                                $this->info("✓ " . ($isFinal ? "Confirmed" : "Detected") . " deposit on [{$network}]: {$amountDecimal} {$tokenSymbol} on {$wallet->address} (Tx: {$txHash}, Confs: {$confirmations})");
+
+                                if ($isFinal) {
+                                    event(new DepositConfirmed($deposit));
+                                } else {
+                                    event(new DepositDetected($deposit));
+                                }
+
                                 $totalDetected++;
                             }
                         }
@@ -108,38 +155,47 @@ class MonitorCommand extends Command
                     }
                 }
 
-                // 2. Scan native currency balance
+                // B. Scan native currency transfers
                 try {
-                    $nativeBalance = $driver->getBalance($wallet->address);
-                    $nativeAmount = (float)$nativeBalance->balanceFormatted;
+                    $nativeTransfers = method_exists($driver, 'getIncomingTransactions')
+                        ? $driver->getIncomingTransactions($wallet->address, null, 18, 5)
+                        : [];
 
-                    if ($nativeAmount > 0.001) {
-                        $nativeTxDetails = method_exists($driver, 'getLatestIncomingTransaction')
-                            ? $driver->getLatestIncomingTransaction($wallet->address)
-                            : null;
+                    foreach ($nativeTransfers as $transfer) {
+                        $txHash = $transfer['tx_hash'];
+                        if (empty($txHash)) continue;
 
-                        $nativeTxHash = $nativeTxDetails['tx_hash'] ?? $driver->getLatestIncomingTxHash($wallet->address);
-                        $nativeFrom = $nativeTxDetails['from_address'] ?? null;
-                        $finalTxHash = $nativeTxHash ?: ('native_' . substr(md5($wallet->address . 'NATIVE' . time()), 0, 16));
+                        $fromAddress   = $transfer['from_address'] ?? null;
+                        $amountDecimal = $transfer['amount'] ?? '0.00000000';
+                        $confirmations = $transfer['confirmations'] ?? 1;
+                        $isFinal       = $confirmations >= $requiredConfirmations;
+                        $status        = $isFinal ? 'confirmed' : 'pending';
 
-                        $existing = $depositModel::where('tx_hash', $finalTxHash)->first();
-                        if (!$existing) {
+                        $existing = $depositModel::where('tx_hash', $txHash)->first();
+
+                        if (!$existing && (float)$amountDecimal > 0.0001) {
                             $deposit = $depositModel::create([
                                 'wallet_id'      => $wallet->id,
                                 'network'        => $network,
-                                'from_address'   => $nativeFrom,
+                                'from_address'   => $fromAddress,
                                 'to_address'     => $wallet->address,
                                 'token_symbol'   => 'NATIVE',
                                 'token_contract' => null,
-                                'amount'         => $nativeAmount,
-                                'tx_hash'        => $finalTxHash,
-                                'status'         => 'confirmed',
+                                'amount'         => $amountDecimal,
+                                'confirmations'  => $confirmations,
+                                'status'         => $status,
                                 'is_credited'    => false,
                                 'is_swept'       => false,
                             ]);
 
-                            $this->info("✓ Native deposit detected on [{$network}]: {$nativeAmount} on {$wallet->address} (From: " . ($nativeFrom ?? 'Unknown') . ")");
-                            event(new DepositConfirmed($deposit));
+                            $this->info("✓ " . ($isFinal ? "Confirmed" : "Detected") . " native deposit on [{$network}]: {$amountDecimal} on {$wallet->address} (Tx: {$txHash})");
+
+                            if ($isFinal) {
+                                event(new DepositConfirmed($deposit));
+                            } else {
+                                event(new DepositDetected($deposit));
+                            }
+
                             $totalDetected++;
                         }
                     }
@@ -149,7 +205,7 @@ class MonitorCommand extends Command
             }
         }
 
-        $this->line("Deposit scan completed. {$totalDetected} new deposits confirmed.");
+        $this->line("Deposit scan completed. {$totalDetected} new deposits processed.");
         return self::SUCCESS;
     }
 }

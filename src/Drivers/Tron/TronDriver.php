@@ -23,7 +23,12 @@ class TronDriver implements NetworkDriverInterface
         if (!empty($config['api_key'])) {
             $headers['TRON-PRO-API-KEY'] = $config['api_key'];
         }
-        $this->rpc = new RpcClient($config['rpc_nodes'] ?? ['https://api.trongrid.io', 'https://api.tronstack.io'], 10, $headers);
+        $this->rpc = new RpcClient(
+            $config['rpc_nodes'] ?? ['https://api.trongrid.io', 'https://api.tronstack.io'],
+            10,
+            $headers,
+            $config['verify'] ?? true
+        );
     }
 
     public function generateWallet(): Keypair

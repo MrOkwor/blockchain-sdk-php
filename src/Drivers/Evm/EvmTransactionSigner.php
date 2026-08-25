@@ -8,15 +8,27 @@ use BlockchainSdk\Crypto\Secp256k1;
 
 class EvmTransactionSigner implements TransactionSignerInterface
 {
+    public static function strip0x(string $hex): string
+    {
+        $clean = trim($hex);
+        if (str_starts_with($clean, '0x') || str_starts_with($clean, '0X')) {
+            return substr($clean, 2);
+        }
+        return $clean;
+    }
+
     public function signTransaction(array $params): string
     {
-        $privHex = ltrim($params['private_key'], '0x');
-        $to = str_pad(strtolower(ltrim($params['to'], '0x')), 40, '0', STR_PAD_LEFT);
+        $privHex = str_pad(strtolower(self::strip0x($params['private_key'])), 64, '0', STR_PAD_LEFT);
+        $to = str_pad(strtolower(self::strip0x($params['to'])), 40, '0', STR_PAD_LEFT);
         $nonce = (int)$params['nonce'];
         $gasPriceWei = (string)$params['gas_price'];
         $gasLimit = (int)$params['gas_limit'];
         $valueWei = (string)($params['value'] ?? '0');
-        $data = ltrim($params['data'] ?? '', '0x');
+        $data = self::strip0x($params['data'] ?? '');
+        if (strlen($data) % 2 !== 0) {
+            $data = '0' . $data;
+        }
         $chainId = (int)($params['chain_id'] ?? 1);
 
         $fields = [
@@ -54,7 +66,7 @@ class EvmTransactionSigner implements TransactionSignerInterface
 
     public static function buildErc20TransferData(string $toAddress, string $amountWei): string
     {
-        $toClean = str_pad(strtolower(ltrim($toAddress, '0x')), 64, '0', STR_PAD_LEFT);
+        $toClean = str_pad(strtolower(self::strip0x($toAddress)), 64, '0', STR_PAD_LEFT);
         $amountHex = str_pad(gmp_strval(gmp_init($amountWei, 10), 16), 64, '0', STR_PAD_LEFT);
         return 'a9059cbb' . $toClean . $amountHex;
     }
