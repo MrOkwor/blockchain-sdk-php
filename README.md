@@ -126,9 +126,9 @@ You can generate both in a single command with **automatic AES-256 encryption** 
 php artisan blockchainsdk:generate-master-wallets
 
 # Generate for a specific blockchain network (e.g. BSC, Polygon, Solana, TRON)
-php artisan blockchainsdk:generate-master-wallets bsc
-php artisan blockchainsdk:generate-master-wallets solana
-php artisan blockchainsdk:generate-master-wallets tron
+php artisan blockchainsdk:generate-master-wallets --network=bsc
+php artisan blockchainsdk:generate-master-wallets --network=solana
+php artisan blockchainsdk:generate-master-wallets --network=tron
 
 # Overwrite existing keys in .env
 php artisan blockchainsdk:generate-master-wallets --force
@@ -359,7 +359,7 @@ In crypto platforms and fintech applications, **"giving value"** means crediting
 
 1. Execute the sweep command with the `--credit` flag:
    ```bash
-   php artisan blockchainsdk:sweep bsc --token=USDT --sponsor --credit
+   php artisan blockchainsdk:sweep --network=bsc --token=USDT --sponsor --credit
    ```
 2. Listen to `BlockchainSdk\Laravel\Events\WalletSwept` in your application:
    ```php
@@ -434,9 +434,9 @@ class CreditUserOnDepositListener
 
 | Command | Description | Options |
 | :--- | :--- | :--- |
-| `php artisan blockchainsdk:generate-master-wallets {network?}` | Generates master cold vault receiving addresses and hot gas station credentials in separated `.env` blocks | `--no-encrypt`, `--no-store`, `--force` |
-| `php artisan blockchainsdk:sweep {network?}` | Sweeps sub-wallets into central cold vault | `--token=` (symbol/contract), `--sponsor` (auto-gas), `--credit` (dispatch value event) |
-| `php artisan blockchainsdk:monitor` | Multi-chain background deposit confirmation listener | `--network=` (filter network), `--once` (run single pass) |
+| `php artisan blockchainsdk:generate-master-wallets` | Generates master cold vault receiving addresses and hot gas station credentials in separated `.env` blocks | `--network=`, `--no-encrypt`, `--no-store`, `--force` |
+| `php artisan blockchainsdk:sweep` | Sweeps sub-wallets into central cold vault | `--network=`, `--token=` (symbol/contract), `--sponsor` (auto-gas), `--credit` (dispatch value event) |
+| `php artisan blockchainsdk:monitor` | Multi-chain background deposit confirmation listener | `--network=`, `--token=`, `--once` (run single pass) |
 | `php artisan vendor:publish --tag="blockchainsdk-config"` | Publishes `config/blockchainsdk.php` | `--force` (overwrite existing) |
 | `php artisan vendor:publish --tag="blockchainsdk-migrations"` | Publishes database migrations | `--force` (overwrite existing) |
 | `php artisan vendor:publish --tag="blockchainsdk-models"` | Publishes Eloquent models to `app/Models/` | `--force` (overwrite existing) |

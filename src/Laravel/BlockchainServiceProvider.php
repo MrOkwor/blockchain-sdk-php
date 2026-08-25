@@ -26,6 +26,13 @@ class BlockchainServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Register Artisan Commands (available for both CLI and Artisan::call() from web requests)
+        $this->commands([
+            GenerateMasterWalletsCommand::class,
+            SweepCommand::class,
+            MonitorCommand::class,
+        ]);
+
         if ($this->app->runningInConsole()) {
             // Publish Configuration
             $this->publishes([
@@ -45,13 +52,6 @@ class BlockchainServiceProvider extends ServiceProvider
                 __DIR__ . '/../../stubs/BlockchainSdkDeposit.stub' => app_path('Models/BlockchainSdkDeposit.php'),
                 __DIR__ . '/../../stubs/BlockchainSdkSweep.stub'   => app_path('Models/BlockchainSdkSweep.php'),
             ], 'blockchainsdk-models');
-
-            // Register Artisan Commands
-            $this->commands([
-                GenerateMasterWalletsCommand::class,
-                SweepCommand::class,
-                MonitorCommand::class,
-            ]);
         }
     }
 }

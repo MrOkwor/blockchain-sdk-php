@@ -11,6 +11,7 @@ class SweepCommand extends Command
 {
     protected $signature = 'blockchainsdk:sweep 
                             {network? : Target blockchain network (ethereum, bsc, polygon, arbitrum, solana, bitcoin, tron, etc.)} 
+                            {--network= : Target blockchain network} 
                             {--token= : Optional token symbol or contract address} 
                             {--sponsor : Automatically sponsor/fuel native gas from master gas station if sub-wallet is dry}
                             {--credit : Automatically record sweep in database and dispatch WalletSwept event to give value to user}';
@@ -19,7 +20,7 @@ class SweepCommand extends Command
 
     public function handle(): int
     {
-        $network = strtolower($this->argument('network') ?? config('blockchainsdk.default', 'ethereum'));
+        $network = strtolower($this->argument('network') ?? $this->option('network') ?? config('blockchainsdk.default', 'ethereum'));
         $tokenInput = $this->option('token');
         $shouldSponsor = (bool)$this->option('sponsor');
         $shouldCredit = (bool)$this->option('credit');
@@ -141,9 +142,7 @@ class SweepCommand extends Command
 
                     $wallet->update(['balance' => 0]);
 
-                    if ($shouldCredit) {
-                        event(new WalletSwept($sweepRecord));
-                    }
+                    event(new WalletSwept($sweepRecord));
 
                     $sweptCount++;
                 } else {

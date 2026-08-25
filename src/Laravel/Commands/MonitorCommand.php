@@ -11,6 +11,7 @@ class MonitorCommand extends Command
 {
     protected $signature = 'blockchainsdk:monitor 
                             {network? : Target specific blockchain network (bsc, ethereum, polygon, solana, tron, etc.)} 
+                            {--network= : Target specific blockchain network} 
                             {--token= : Target a specific token symbol or contract address} 
                             {--once : Execute a single pass and exit (default behavior)}';
 

@@ -10,6 +10,7 @@ class GenerateMasterWalletsCommand extends Command
 {
     protected $signature = 'blockchainsdk:generate-master-wallets 
                             {network? : Optional target blockchain network (ethereum, bsc, polygon, solana, tron, bitcoin, etc.)}
+                            {--network= : Target blockchain network}
                             {--no-encrypt : Store raw plaintext private keys instead of encrypting}
                             {--no-store : Output credentials to console without writing to .env}
                             {--force : Overwrite existing master and gas wallet keys in .env}';
@@ -18,7 +19,7 @@ class GenerateMasterWalletsCommand extends Command
 
     public function handle(): int
     {
-        $targetNetwork = $this->argument('network');
+        $targetNetwork = $this->argument('network') ?? $this->option('network');
         $shouldEncrypt = !$this->option('no-encrypt');
         $shouldStore   = !$this->option('no-store');
         $force         = (bool)$this->option('force');
