@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use BlockchainSdk\DTOs\TokenBalance;
+use BlockchainSdk\DTOs\TransactionResult;
 use BlockchainSdk\Laravel\Facades\Blockchain;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -40,5 +42,28 @@ class BlockchainSdkWallet extends Model
             'mnemonic'    => $keypair->mnemonic,
             'is_active'   => true,
         ]);
+    }
+
+    public function getBalance(?string $tokenContract = null): TokenBalance
+    {
+        return Blockchain::driver($this->network)->getBalance($this->address, $tokenContract);
+    }
+
+    public function sweep(?string $tokenContract = null, bool $sponsor = true): TransactionResult
+    {
+        $driver = Blockchain::driver($this->network);
+        $masterVault = Blockchain::getMasterWallet($this->network);
+        $gasKey = $sponsor ? Blockchain::getMasterGasKey($this->network) : null;
+
+        if ($gasKey && $tokenContract) {
+            return $driver->sweepTokenWithGasSponsorship(
+                subWalletPrivateKey: $this->private_key,
+                masterGasPrivateKey: $gasKey,
+                toVaultAddress:      $masterVault,
+                tokenContract:       $tokenContract
+            );
+        }
+
+        return $driver->sweep($this->private_key, $masterVault, $tokenContract);
     }
 }
