@@ -255,7 +255,11 @@ class EvmDriver implements NetworkDriverInterface
 
         $gasPriceRes = $this->rpc->call('eth_gasPrice', []);
         $gasPriceWei = gmp_strval(gmp_init($gasPriceRes['result'] ?? '0x4a817c800', 16), 10);
-        $totalGasFee = bcmul($gasPriceWei, '21000');
+
+        // Recipient may be a contract or EIP-7702 delegated EOA that needs more than a
+        // plain 21000 transfer, so estimate against the real destination before reserving fees.
+        $gasLimit = $this->estimateNativeTransferGasLimit($from, $toAddress, $balance->balanceRaw);
+        $totalGasFee = bcmul($gasPriceWei, (string)$gasLimit);
         // Add 10% safety buffer for gas price fluctuations
         $gasFeeWithBuffer = bcadd($totalGasFee, bcdiv($totalGasFee, '10', 0));
 
@@ -268,9 +272,33 @@ class EvmDriver implements NetworkDriverInterface
             'from_private_key' => $fromPrivateKey,
             'to'               => $toAddress,
             'value'            => $sweepable,
-            'gas_limit'        => 21000,
+            'gas_limit'        => $gasLimit,
             'gas_price'        => $gasPriceWei,
         ]);
+    }
+
+    /**
+     * Estimate the gas limit for a native currency transfer, falling back to a plain
+     * EOA-to-EOA limit only when estimation is unavailable. Destinations that are
+     * contracts or EIP-7702 delegated EOAs can require significantly more than 21000.
+     */
+    private function estimateNativeTransferGasLimit(string $from, string $toAddress, string $valueRaw): int
+    {
+        try {
+            $estRes = $this->rpc->call('eth_estimateGas', [[
+                'from'  => $from,
+                'to'    => $toAddress,
+                'value' => '0x' . gmp_strval(gmp_init($valueRaw, 10), 16),
+            ]]);
+            $estimatedGas = hexdec($estRes['result'] ?? '0x0');
+            if ($estimatedGas > 0) {
+                return min((int)($estimatedGas * 1.20), 500000);
+            }
+        } catch (\Throwable $e) {
+            // Fall back to the plain transfer limit on transport/estimation errors.
+        }
+
+        return 21000;
     }
 
     public function getTransactionReceipt(string $txHash): ?array
@@ -308,11 +336,14 @@ class EvmDriver implements NetworkDriverInterface
         // Add 10% safety buffer for gas price fluctuations
         $fuelAmountWei = bcadd($deficitWei, bcdiv($deficitWei, '10', 0));
 
+        $from = $this->generator->privateKeyToAddress($masterGasPrivateKey);
+        $gasLimit = $this->estimateNativeTransferGasLimit($from, $subWalletAddress, $fuelAmountWei);
+
         return $this->sendTransaction([
             'from_private_key' => $masterGasPrivateKey,
             'to'               => $subWalletAddress,
             'value'            => $fuelAmountWei,
-            'gas_limit'        => 21000,
+            'gas_limit'        => $gasLimit,
         ]);
     }
 
