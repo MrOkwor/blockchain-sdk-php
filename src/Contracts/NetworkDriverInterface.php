@@ -49,6 +49,11 @@ interface NetworkDriverInterface
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string;
 
     /**
+     * @return array<int, array{tx_hash: string, log_index: int, block_number: int|null, from_address: string|null, to_address: string, amount_raw: string, amount: string, decimals: int, confirmations: int}>
+     */
+    public function getIncomingTransactions(string $address, ?string $tokenContract = null, int $decimals = 18, int $limit = 10): array;
+
+    /**
      * Retrieve transaction receipt by hash if already mined.
      */
     public function getTransactionReceipt(string $txHash): ?TransactionReceipt;

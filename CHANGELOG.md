@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.1.1] - 2026-10-30
+
+### 🚀 Non-EVM Incoming Deposit Detection & Multi-Chain Monitor Upgrade
+
+This release resolves non-EVM incoming deposit detection across TRON, Solana, and Bitcoin by implementing native and token incoming transaction parsing in `TronDriver`, `SolanaDriver`, and `BitcoinDriver`, and standardizing the contract interface and monitor command.
+
+---
+
+### 1. 🛡️ NetworkDriverInterface Ingestion Contract
+
+- **Added `getIncomingTransactions()` to `NetworkDriverInterface`**:
+  - `getIncomingTransactions(string $address, ?string $tokenContract = null, int $decimals = 18, int $limit = 10): array`
+  - Guarantees universal transaction scanning across all supported network driver implementations, returning normalized transfer records:
+    - `tx_hash` (string): On-chain transaction identifier.
+    - `log_index` (int): Event log, instruction, or output index for disambiguating multiple transfers in the same transaction.
+    - `block_number` (int|null): Height of the block containing the transfer.
+    - `from_address` (string|null): Originating sender address.
+    - `to_address` (string): Monitored recipient address.
+    - `amount_raw` (string): Exact atomic base units (wei, lamports, sun, satoshis).
+    - `amount` (string): Arbitrary-precision decimal representation formatted according to the token or chain decimals.
+    - `decimals` (int): Number of decimals for the currency or token.
+    - `confirmations` (int): Calculated confirmations against the current head block or slot height.
+
+---
+
+### 2. ⚡ Multi-Chain Driver Implementations
+
+- **`TronDriver::getIncomingTransactions()`**:
+  - Added full TRC20 and native TRX transfer detection via TRONGrid/TRONStack APIs (`v1/accounts/{address}/transactions/trc20` and `v1/accounts/{address}/transactions`).
+  - Added strict transaction receipt verification via `wallet/gettransactioninfobyid` to ensure failed or reverted transactions (`receipt.result !== 'SUCCESS'`) are rejected.
+  - Verifies TRC20 `ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef` event topics, contract address, and recipient hex/base58 conversion.
+  - Computes block confirmations against `wallet/getnowblock`.
+- **`SolanaDriver::getIncomingTransactions()`**:
+  - Added SPL token transfer detection by querying owner Associated Token Accounts (ATAs) via `getTokenAccountsByOwner` and scanning `getSignaturesForAddress`.
+  - Added support for both top-level and inner instruction parsing (`transfer` and `transferChecked`) across standard `spl-token` and `spl-token-2022` programs.
+  - Added native SOL transfer detection via system program instructions (`transfer`), tracking inner instruction indexes to prevent collision.
+  - Computes confirmations against current slot (`getSlot`).
+- **`BitcoinDriver::getIncomingTransactions()`**:
+  - Added Esplora / Mempool REST API ingestion (`address/{address}/txs`).
+  - Excludes outgoing change outputs where the monitored address appears in `vin.prevout`.
+  - Indexes output positions (`vout` index) to accurately distinguish multi-output transactions.
+  - Tracks confirmed block height against `blocks` tip height or marks unconfirmed mempool transactions as 0 confirmations.
+
+---
+
+### 3. 🔍 MonitorCommand Robustness & Precision
+
+- **Removed Silent Fallback**:
+  - Removed `method_exists` check fallback to empty array `[]`, ensuring all drivers implement and execute `getIncomingTransactions()`.
+- **Block Height Tracking**:
+  - Updates `$pendingDeposit->block_number` upon confirmation rather than leaving it null or unindexed.
+- **Accurate Native Decimals & Thresholds**:
+  - Applies chain-specific native decimals during scanning:
+    - TRON: 6 decimals (`SUN`)
+    - Solana: 9 decimals (`Lamports`)
+    - Bitcoin: 8 decimals (`Satoshis`)
+    - EVM: 18 decimals (`Wei`)
+  - Corrected native dust threshold condition to apply EVM-specific dust threshold (`100000000000000` wei) only for 18-decimal chains, allowing legitimate micro-deposits on Bitcoin, TRON, and Solana.
+
+---
+
+### 4. 🧪 Comprehensive Unit & Integration Tests
+
+- Added `IncomingTransactionsTest.php` in `tests/` verifying TRON TRC20/native transfer detection, Solana SPL/native instruction parsing, and Bitcoin change output filtering with PHPUnit mocks.
+
+---
+
 ## [v1.1.0] - 2026-10-01
 
 ### 🚀 High-Performance Ingestion, Fee Accounting & Multi-Chain Architecture Upgrade

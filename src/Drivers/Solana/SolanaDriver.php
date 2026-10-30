@@ -211,6 +211,98 @@ class SolanaDriver implements NetworkDriverInterface
         }
     }
 
+    public function getIncomingTransactions(string $address, ?string $tokenContract = null, int $decimals = 18, int $limit = 10): array
+    {
+        $accounts = [];
+        if ($tokenContract) {
+            $response = $this->rpc->call('getTokenAccountsByOwner', [$address, ['mint' => $tokenContract], ['encoding' => 'jsonParsed', 'commitment' => 'confirmed']]);
+            if (! is_array($response['result']['value'] ?? null)) {
+                throw new \RuntimeException('Solana token accounts are unavailable.');
+            }
+            foreach ($response['result']['value'] ?? [] as $account) {
+                $accounts[$account['pubkey']] = $account['account']['data']['parsed']['info'];
+            }
+        }
+        $signatures = [];
+        foreach (array_unique(array_merge([$address], array_keys($accounts))) as $accountAddress) {
+            $response = $this->rpc->call('getSignaturesForAddress', [$accountAddress, ['limit' => min(1000, max(1, $limit)), 'commitment' => 'confirmed']]);
+            if (! is_array($response['result'] ?? null)) {
+                throw new \RuntimeException('Solana transaction history is unavailable.');
+            }
+            foreach ($response['result'] as $signature) {
+                if (! empty($signature['signature']) && ($signature['err'] ?? null) === null) {
+                    $signatures[$signature['signature']] = true;
+                }
+            }
+        }
+        $height = $this->rpc->call('getSlot', [['commitment' => 'confirmed']])['result'] ?? null;
+        if (! is_int($height)) {
+            throw new \RuntimeException('Solana chain slot is unavailable.');
+        }
+        $transfers = [];
+        foreach (array_keys($signatures) as $hash) {
+            $transaction = $this->rpc->call('getTransaction', [$hash, ['encoding' => 'jsonParsed', 'maxSupportedTransactionVersion' => 0, 'commitment' => 'confirmed']])['result'] ?? null;
+            if (! is_array($transaction) || ! is_array($transaction['meta'] ?? null)
+                || ($transaction['meta']['err'] ?? null) !== null || ! isset($transaction['slot'])) {
+                continue;
+            }
+            $message = $transaction['transaction']['message'] ?? [];
+            $tokenAccounts = $accounts;
+            foreach (array_merge($transaction['meta']['preTokenBalances'] ?? [], $transaction['meta']['postTokenBalances'] ?? []) as $balance) {
+                $key = $message['accountKeys'][$balance['accountIndex']] ?? null;
+                $key = is_array($key) ? ($key['pubkey'] ?? null) : $key;
+                if ($key) {
+                    $tokenAccounts[$key] = $balance;
+                }
+            }
+            $instructions = $message['instructions'] ?? [];
+            foreach ($transaction['meta']['innerInstructions'] ?? [] as $group) {
+                foreach ($group['instructions'] ?? [] as $instruction) {
+                    $instructions[] = $instruction;
+                }
+            }
+            foreach ($instructions as $index => $instruction) {
+                $parsed = $instruction['parsed'] ?? [];
+                $info = $parsed['info'] ?? [];
+                if (! in_array($parsed['type'] ?? '', ['transfer', 'transferChecked'], true)) {
+                    continue;
+                }
+                $destination = $info['destination'] ?? '';
+                $source = $info['source'] ?? '';
+                if ($tokenContract) {
+                    $destinationInfo = $tokenAccounts[$destination] ?? [];
+                    if (! in_array($instruction['program'] ?? '', ['spl-token', 'spl-token-2022'], true)
+                        || ($destinationInfo['mint'] ?? null) !== $tokenContract
+                        || ($destinationInfo['owner'] ?? null) !== $address
+                        || ($tokenAccounts[$source]['owner'] ?? null) === $address) {
+                        continue;
+                    }
+                    $raw = (string) ($info['tokenAmount']['amount'] ?? $info['amount'] ?? '0');
+                    $precision = $decimals;
+                    $from = $tokenAccounts[$source]['owner'] ?? $info['authority'] ?? null;
+                } else {
+                    if (($instruction['program'] ?? '') !== 'system' || $destination !== $address || $source === $address) {
+                        continue;
+                    }
+                    $raw = (string) ($info['lamports'] ?? '0');
+                    $precision = 9;
+                    $from = $source;
+                }
+                if (! preg_match('/^[0-9]+$/D', $raw) || bccomp($raw, '0') <= 0) {
+                    continue;
+                }
+                $transfers[] = [
+                    'tx_hash' => $hash, 'log_index' => $index, 'block_number' => (int) $transaction['slot'],
+                    'from_address' => $from, 'to_address' => $address, 'amount_raw' => $raw,
+                    'amount' => Decimal::fromBaseUnit($raw, $precision), 'decimals' => $precision,
+                    'confirmations' => max(0, $height - (int) $transaction['slot'] + 1),
+                ];
+            }
+        }
+
+        return $transfers;
+    }
+
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
     {
         try {

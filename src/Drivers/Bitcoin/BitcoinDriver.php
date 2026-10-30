@@ -208,6 +208,44 @@ class BitcoinDriver implements NetworkDriverInterface
         return new TransactionResult(false, null, $signedRawTx, 'All Bitcoin broadcast nodes failed. Last error: '.($lastError ?? 'Unknown error'));
     }
 
+    public function getIncomingTransactions(string $address, ?string $tokenContract = null, int $decimals = 18, int $limit = 10): array
+    {
+        if ($tokenContract !== null) {
+            return [];
+        }
+
+        $transactions = $this->rpc->get("address/{$address}/txs");
+        $blocks = $this->rpc->get('blocks');
+        $height = $blocks[0]['height'] ?? null;
+        if (! is_int($height)) {
+            throw new \RuntimeException('Bitcoin chain height is unavailable.');
+        }
+        $transfers = [];
+        foreach (array_slice($transactions, 0, max(1, $limit)) as $transaction) {
+            $inputs = $transaction['vin'] ?? [];
+            if (in_array($address, array_column(array_column($inputs, 'prevout'), 'scriptpubkey_address'), true)) {
+                continue;
+            }
+            $block = $transaction['status']['block_height'] ?? null;
+            $confirmations = ($transaction['status']['confirmed'] ?? false) && $block !== null
+                ? max(0, $height - (int) $block + 1) : 0;
+            foreach ($transaction['vout'] ?? [] as $index => $output) {
+                $raw = (string) ($output['value'] ?? '0');
+                if (($output['scriptpubkey_address'] ?? null) !== $address || empty($transaction['txid']) || bccomp($raw, '0') <= 0) {
+                    continue;
+                }
+                $transfers[] = [
+                    'tx_hash' => $transaction['txid'], 'log_index' => $index, 'block_number' => $block,
+                    'from_address' => $inputs[0]['prevout']['scriptpubkey_address'] ?? null,
+                    'to_address' => $address, 'amount_raw' => $raw, 'amount' => Decimal::fromBaseUnit($raw, 8),
+                    'decimals' => 8, 'confirmations' => $confirmations,
+                ];
+            }
+        }
+
+        return $transfers;
+    }
+
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
     {
         $nodes = ['https://blockstream.info/api', 'https://mempool.space/api'];

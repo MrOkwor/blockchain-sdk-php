@@ -237,6 +237,93 @@ class TronDriver implements NetworkDriverInterface
         }
     }
 
+    public function getIncomingTransactions(string $address, ?string $tokenContract = null, int $decimals = 18, int $limit = 10): array
+    {
+        $path = "v1/accounts/{$address}/transactions".($tokenContract ? '/trc20' : '');
+        $query = ['limit' => min(200, max(1, $limit)), 'only_to' => 'true'];
+        if ($tokenContract) {
+            $query['contract_address'] = $tokenContract;
+        }
+        $response = $this->rpc->get($path, $query);
+        if (($response['success'] ?? false) !== true || ! is_array($response['data'] ?? null)) {
+            throw new \RuntimeException('TRON transaction history is unavailable.');
+        }
+        $head = $this->rpc->post('wallet/getnowblock');
+        $height = $head['block_header']['raw_data']['number'] ?? null;
+        if (! is_int($height)) {
+            throw new \RuntimeException('TRON chain height is unavailable.');
+        }
+        $transfers = [];
+        $seen = [];
+        foreach ($response['data'] as $candidate) {
+            $hash = $candidate['transaction_id'] ?? $candidate['txID'] ?? null;
+            if (! $hash || isset($seen[$hash])) {
+                continue;
+            }
+            $seen[$hash] = true;
+            $receipt = $this->rpc->post('wallet/gettransactioninfobyid', ['value' => $hash]);
+            if (($receipt['id'] ?? null) !== $hash || ! isset($receipt['blockNumber'])) {
+                continue;
+            }
+            $result = $receipt['receipt']['result'] ?? ($tokenContract ? null : 'SUCCESS');
+            if ($result !== 'SUCCESS' || isset($receipt['result'])) {
+                continue;
+            }
+            $block = (int) $receipt['blockNumber'];
+            $confirmations = max(0, $height - $block + 1);
+            if ($tokenContract) {
+                foreach ($receipt['log'] ?? [] as $index => $log) {
+                    $topics = $log['topics'] ?? [];
+                    if ($this->depositAddress($log['address'] ?? '') !== $tokenContract
+                        || count($topics) !== 3
+                        || strtolower($topics[0] ?? '') !== 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+                        || ! preg_match('/^[0-9a-f]{64}$/iD', $topics[1] ?? '')
+                        || ! preg_match('/^[0-9a-f]{64}$/iD', $topics[2] ?? '')
+                        || $this->depositAddress(substr($topics[2], -40)) !== $address
+                        || ! preg_match('/^[0-9a-f]{64}$/iD', $log['data'] ?? '')) {
+                        continue;
+                    }
+                    $raw = gmp_strval(gmp_init($log['data'], 16));
+                    if (bccomp($raw, '0') <= 0) {
+                        continue;
+                    }
+                    $transfers[] = [
+                        'tx_hash' => $hash, 'log_index' => $index, 'block_number' => $block,
+                        'from_address' => $this->depositAddress(substr($topics[1], -40)), 'to_address' => $address,
+                        'amount_raw' => $raw, 'amount' => Decimal::fromBaseUnit($raw, $decimals),
+                        'decimals' => $decimals, 'confirmations' => $confirmations,
+                    ];
+                }
+            } else {
+                foreach ($candidate['raw_data']['contract'] ?? [] as $index => $contract) {
+                    $info = $contract['parameter']['value'] ?? [];
+                    $raw = (string) ($info['amount'] ?? '0');
+                    if (($contract['type'] ?? null) !== 'TransferContract'
+                        || $this->depositAddress($info['to_address'] ?? '') !== $address || bccomp($raw, '0') <= 0) {
+                        continue;
+                    }
+                    $transfers[] = [
+                        'tx_hash' => $hash, 'log_index' => $index, 'block_number' => $block,
+                        'from_address' => $this->depositAddress($info['owner_address'] ?? ''), 'to_address' => $address,
+                        'amount_raw' => $raw, 'amount' => Decimal::fromBaseUnit($raw, 6),
+                        'decimals' => 6, 'confirmations' => $confirmations,
+                    ];
+                }
+            }
+        }
+
+        return $transfers;
+    }
+
+    private function depositAddress(string $address): string
+    {
+        if (preg_match('/^(41)?[0-9a-f]{40}$/iD', $address)) {
+            return Base58::encodeCheck(hex2bin('41'.substr($address, -40)));
+        }
+
+        return $address;
+    }
+
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
     {
         try {

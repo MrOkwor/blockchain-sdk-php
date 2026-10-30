@@ -79,9 +79,7 @@ class MonitorCommand extends Command
 
             foreach ($pendingDeposits as $pendingDeposit) {
                 try {
-                    $transfers = method_exists($driver, 'getIncomingTransactions')
-                        ? $driver->getIncomingTransactions($pendingDeposit->to_address, $pendingDeposit->token_contract, (int) ($pendingDeposit->decimals ?? 18), 5)
-                        : [];
+                    $transfers = $driver->getIncomingTransactions($pendingDeposit->to_address, $pendingDeposit->token_contract, (int) ($pendingDeposit->decimals ?? 18), 5);
 
                     foreach ($transfers as $tx) {
                         $txLogIndex = (int) ($tx['log_index'] ?? 0);
@@ -90,6 +88,7 @@ class MonitorCommand extends Command
                         if ($tx['tx_hash'] === $pendingDeposit->tx_hash && $txLogIndex === $depositLogIndex) {
                             $confs = (int) ($tx['confirmations'] ?? 1);
                             $pendingDeposit->confirmations = $confs;
+                            $pendingDeposit->block_number = $tx['block_number'] ?? $pendingDeposit->block_number;
 
                             if ($confs >= $requiredConfirmations) {
                                 $pendingDeposit->status = 'confirmed';
@@ -222,9 +221,7 @@ class MonitorCommand extends Command
                     $tokenDecimals = (int) ($token['decimals'] ?? 18);
 
                     try {
-                        $incomingTransfers = method_exists($driver, 'getIncomingTransactions')
-                            ? $driver->getIncomingTransactions($wallet->address, $tokenContract, $tokenDecimals, 10)
-                            : [];
+                        $incomingTransfers = $driver->getIncomingTransactions($wallet->address, $tokenContract, $tokenDecimals, 10);
 
                         foreach ($incomingTransfers as $transfer) {
                             $txHash = $transfer['tx_hash'];
@@ -286,9 +283,13 @@ class MonitorCommand extends Command
 
                 // B. Scan native currency transfers
                 try {
-                    $nativeTransfers = method_exists($driver, 'getIncomingTransactions')
-                        ? $driver->getIncomingTransactions($wallet->address, null, 18, 5)
-                        : [];
+                    $nativeDecimals = match ($network) {
+                        'tron' => 6,
+                        'solana' => 9,
+                        'bitcoin' => 8,
+                        default => 18,
+                    };
+                    $nativeTransfers = $driver->getIncomingTransactions($wallet->address, null, $nativeDecimals, 5);
 
                     foreach ($nativeTransfers as $transfer) {
                         $txHash = $transfer['tx_hash'];
@@ -310,8 +311,8 @@ class MonitorCommand extends Command
                             ->where('log_index', $logIndex)
                             ->first();
 
-                        // Native dust threshold: 0.0001 ETH/BNB (100,000,000,000,000 wei) via arbitrary-precision check
-                        if (! $existing && bccomp($amountRaw, '100000000000000') > 0) {
+                        $minimumRaw = $nativeDecimals === 18 ? '100000000000000' : '0';
+                        if (! $existing && bccomp($amountRaw, $minimumRaw) > 0) {
                             $deposit = $depositModel::create([
                                 'wallet_id' => $wallet->id,
                                 'network' => $network,
@@ -324,7 +325,7 @@ class MonitorCommand extends Command
                                 'token_contract' => null,
                                 'amount_raw' => $amountRaw,
                                 'amount' => $amountDecimal,
-                                'decimals' => 18,
+                                'decimals' => $nativeDecimals,
                                 'confirmations' => $confirmations,
                                 'status' => $status,
                                 'is_credited' => false,
