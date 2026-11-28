@@ -27,7 +27,7 @@ class MasterWalletDerivationTest extends TestCase
             [new LitecoinDriver([]), '4ab54480cbbaa53d5d3ba43a3e85d221df085490e88346ad11579e17000db7bb'],
             [new TronDriver([]), 'b5a4cea271ff424d7c31dc12a3e43e401df7a40d7412a15750f3f0b6b5449a28'],
             [new XrpDriver([]), '90802a50aa84efb6cdb225f17c27616ea94048c179142fecf03f4712a07ea7a4'],
-            [new SolanaDriver([]), 'ec252c5d95bcf80a4b22df119cedd4ae1aed07364578e8d43bdfa0435625dbd1'],
+            [new SolanaDriver([]), '37df573b3ac4ad5b522e064e25b63ea16bcbe79d449e81a0268d1047948bb445'],
         ];
 
         foreach ($cases as [$driver, $expected]) {
@@ -38,6 +38,16 @@ class MasterWalletDerivationTest extends TestCase
             $this->assertSame($expected, $actual);
             $this->assertTrue($driver->validateAddress($wallet->address));
         }
+    }
+
+    public function test_solana_derivation_matches_the_four_level_wallet_core_vector(): void
+    {
+        $derivation = new MasterWalletDerivation;
+        $seed = $derivation->seedFromMnemonic('team engine square letter hero song dizzy scrub tornado fabric divert saddle');
+
+        $wallet = $derivation->deriveWallet($seed, new SolanaDriver([]));
+
+        $this->assertSame('CgWJeEWkiYqosy1ba7a3wn9HAQuHyK48xs3LM4SSDc1C', $wallet->address);
     }
 
     public function test_generated_phrases_have_twenty_four_words_and_a_valid_checksum(): void

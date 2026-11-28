@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.2.2] - 2026-11-28
+
+### Fixed
+
+- New seed-derived Solana master and gas wallets now use `m/44'/501'/0'/0'`, matching the path selected in the verified Trust Wallet import. Existing wallet credentials are preserved on normal generator runs.
+
+### Documentation
+
+- Added a [wallet derivation guide](WALLET-DERIVATION.md) with paths for every supported network and recovery guidance for earlier Solana wallets.
+
+---
+
 ## [v1.2.1] - 2026-11-28
 
 ### Fixed

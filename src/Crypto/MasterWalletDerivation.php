@@ -75,7 +75,7 @@ class MasterWalletDerivation
         $path = [$purpose | self::HARDENED, $coin | self::HARDENED, self::HARDENED];
         if ($driver instanceof SolanaDriver) {
             $node = hash_hmac('sha512', $seed, 'ed25519 seed', true);
-            foreach ($path as $index) {
+            foreach ([...$path, self::HARDENED] as $index) {
                 $node = hash_hmac('sha512', "\0".substr($node, 0, 32).pack('N', $index), substr($node, 32), true);
             }
 

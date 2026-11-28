@@ -254,14 +254,7 @@ The master and gas addresses match by default. An existing `BLOCKCHAIN_MASTER_*`
 
 Display the phrase in a private terminal using `--show-seed-phrase` and import it using the matching network and derivation path in your wallet app. Keep an offline backup. The stored copy requires the Laravel `APP_KEY` for decryption. `--no-store` prints the phrase and derived addresses without writing credentials to the environment file.
 
-| Network | Derivation path |
-| --- | --- |
-| EVM networks | `m/44'/60'/0'/0/0` |
-| Bitcoin, native SegWit | `m/84'/0'/0'/0/0` |
-| Litecoin, native SegWit | `m/84'/2'/0'/0/0` |
-| TRON | `m/44'/195'/0'/0/0` |
-| XRP Ledger | `m/44'/144'/0'/0/0` |
-| Solana, Ed25519 | `m/44'/501'/0'` |
+See [Wallet derivation paths](WALLET-DERIVATION.md) for each supported network and instructions for recovering Solana wallets generated before v1.2.2.
 
 #### How Master & Gas Wallets Are Stored in `.env`
 ```env
