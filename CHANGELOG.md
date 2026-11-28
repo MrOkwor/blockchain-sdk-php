@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.2.1] - 2026-11-28
+
+### Fixed
+
+- Master and gas wallet generation now uses the same labeled environment-file sections in both modes. New encrypted recovery phrases get a dedicated section. Existing entries stay in place, and reruns reuse the existing headings.
+- Running the legacy generator without force preserves existing gas addresses while still normalizing unprefixed gas private keys.
+
+---
+
 ## [v1.2.0] - 2026-11-28
 
 ### Added

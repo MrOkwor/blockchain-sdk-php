@@ -101,75 +101,48 @@ class GenerateMasterWalletsCommand extends Command
         $this->table(['Network', 'Gas Station Address', 'Gas Private Key'], $gasRows);
 
         if ($shouldStore) {
-            $envFile = base_path('.env');
-            if (! file_exists($envFile)) {
+            $envFile = $this->laravel->environmentFilePath();
+            if (! is_file($envFile)) {
                 $this->warn("No .env file found at {$envFile}. Skipped saving.");
 
                 return self::SUCCESS;
             }
 
             $envContent = file_get_contents($envFile);
+            if ($envContent === false) {
+                $this->error('The environment file could not be read.');
 
-            $masterBlock = "\n# ==============================================================================\n".
-                           "# BLOCKCHAIN SDK: MASTER COLD VAULT RECEIVING WALLETS\n".
-                           "# Destination addresses where customer sub-wallet funds are swept and stored.\n".
-                           '# ==============================================================================';
-
-            $gasBlock = "\n# ==============================================================================\n".
-                        "# BLOCKCHAIN SDK: HOT GAS STATION WALLETS & PRIVATE KEYS\n".
-                        "# Wallets used solely to sponsor and fuel gas fees into sub-wallets before sweeps.\n".
-                        '# ==============================================================================';
-
-            $modified = false;
-
-            // Append Master Block Header if missing
-            if (! str_contains($envContent, 'BLOCKCHAIN SDK: MASTER COLD VAULT RECEIVING WALLETS')) {
-                $envContent .= $masterBlock;
+                return self::FAILURE;
             }
 
-            foreach ($masterEnvUpdates as $key => $value) {
-                if (preg_match("/^{$key}=.*/m", $envContent)) {
-                    if ($force) {
-                        $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$value}\"", $envContent);
-                        $modified = true;
-                    }
-                } else {
-                    $envContent .= "\n{$key}=\"{$value}\"";
-                    $modified = true;
+            $updates = [];
+            foreach ($masterEnvUpdates + $gasEnvUpdates as $key => $value) {
+                if ($force || ! preg_match($this->envEntryPattern($key), $envContent, $matches)) {
+                    $updates[$key] = $value;
+
+                    continue;
                 }
-            }
 
-            // Append Gas Block Header if missing
-            if (! str_contains($envContent, 'BLOCKCHAIN SDK: HOT GAS STATION WALLETS & PRIVATE KEYS')) {
-                $envContent .= $gasBlock;
-            }
-
-            foreach ($gasEnvUpdates as $key => $value) {
-                if (preg_match("/^{$key}=\"?(.*?)\"?\s*$/m", $envContent, $matches)) {
-                    $existingVal = $matches[1] ?? '';
-                    if ($force) {
-                        $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$value}\"", $envContent);
-                        $modified = true;
-                    } elseif (! empty($existingVal) && ! str_starts_with($existingVal, 'enc:') && ! str_starts_with($existingVal, 'plain:')) {
-                        // Normalize legacy unprefixed key: test if decryptable
-                        try {
-                            Crypt::decryptString($existingVal);
-                            $normalizedVal = "enc:v1:{$existingVal}";
-                        } catch (\Throwable $e) {
-                            $normalizedVal = "plain:{$existingVal}";
-                        }
-                        $envContent = preg_replace("/^{$key}=.*/m", "{$key}=\"{$normalizedVal}\"", $envContent);
-                        $modified = true;
-                        $this->line("Prefixed existing key {$key} with ".(str_starts_with($normalizedVal, 'enc:') ? '<fg=green>enc:v1:</>' : '<fg=yellow>plain:</>'));
-                    }
-                } else {
-                    $envContent .= "\n{$key}=\"{$value}\"";
-                    $modified = true;
+                if (! str_starts_with($key, 'BLOCKCHAIN_GAS_KEY_')) {
+                    continue;
                 }
+
+                $existingValue = Dotenv::parse($matches[0])[$key] ?? '';
+                if ($existingValue === '' || str_starts_with($existingValue, 'enc:') || str_starts_with($existingValue, 'plain:')) {
+                    continue;
+                }
+
+                try {
+                    Crypt::decryptString($existingValue);
+                    $updates[$key] = 'enc:v1:'.$existingValue;
+                } catch (\Throwable) {
+                    $updates[$key] = 'plain:'.$existingValue;
+                }
+                $this->line("Prefixed existing private key {$key}.");
             }
 
-            if ($modified) {
-                file_put_contents($envFile, $envContent);
+            if ($updates !== []) {
+                (new Filesystem)->replace($envFile, $this->formatWalletEnv($envContent, $updates), 0600);
                 $this->info('Successfully saved separate Master Vault and Hot Gas Station blocks to .env file!');
             } else {
                 $this->comment('Keys already exist in .env. Use --force to overwrite.');
@@ -259,20 +232,7 @@ class GenerateMasterWalletsCommand extends Command
                 if ($storedPhrase === '') {
                     $updates[self::SEED_KEY] = 'enc:v1:'.Crypt::encryptString($mnemonic);
                 }
-                foreach ($updates as $key => $value) {
-                    $entry = $key.'="'.$value.'"';
-                    $pattern = '/^(?:export[ 	]+)?'.preg_quote($key, '/').'[ 	]*=[^
-]*/m';
-                    if (preg_match($pattern, $env)) {
-                        $env = preg_replace_callback($pattern, static fn (): string => $entry, $env);
-                    } else {
-                        $env = rtrim($env, '
-').'
-'.$entry.'
-';
-                    }
-                }
-                (new Filesystem)->replace($envPath, $env, 0600);
+                (new Filesystem)->replace($envPath, $this->formatWalletEnv($env, $updates), 0600);
                 $this->info('Saved derived wallet credentials and encrypted recovery phrase.');
             }
 
@@ -293,5 +253,68 @@ class GenerateMasterWalletsCommand extends Command
                 fclose($lock);
             }
         }
+    }
+
+    private function envEntryPattern(string $key): string
+    {
+        return '/^[ \t]*(?:export[ \t]+)?'.preg_quote($key, '/').'[ \t]*=[^\r\n]*/m';
+    }
+
+    /** @param array<string, string> $updates */
+    private function formatWalletEnv(#[\SensitiveParameter] string $env, #[\SensitiveParameter] array $updates): string
+    {
+        $newline = str_contains($env, "\r\n") ? "\r\n" : "\n";
+        $sections = [
+            'master' => ['MASTER COLD VAULT RECEIVING WALLETS', 'Destination addresses where customer sub-wallet funds are swept and stored.', 'BLOCKCHAIN_MASTER_(?!SEED_PHRASE\b)[A-Z0-9_]+'],
+            'gas' => ['HOT GAS STATION WALLETS & PRIVATE KEYS', 'Wallets used solely to sponsor and fuel gas fees into sub-wallets before sweeps.', 'BLOCKCHAIN_GAS_(?:ADDRESS|KEY)_[A-Z0-9_]+'],
+            'seed' => ['WALLET RECOVERY PHRASE', 'Encrypted recovery phrase for derived master and gas wallets.', self::SEED_KEY],
+        ];
+
+        $pending = [];
+        foreach ($updates as $key => $value) {
+            $entry = $key.'="'.$value.'"';
+            $pattern = $this->envEntryPattern($key);
+            if (preg_match($pattern, $env)) {
+                $env = preg_replace_callback($pattern, static fn (): string => $entry, $env);
+
+                continue;
+            }
+
+            $section = match (true) {
+                $key === self::SEED_KEY => 'seed',
+                str_starts_with($key, 'BLOCKCHAIN_GAS_') => 'gas',
+                default => 'master',
+            };
+            $pending[$section][] = $entry;
+        }
+
+        $divider = '# ==============================================================================';
+        foreach ($sections as $section => [$title, $description, $keys]) {
+            if (! isset($pending[$section])) {
+                continue;
+            }
+
+            $heading = '# BLOCKCHAIN SDK: '.$title;
+            $entries = implode($newline, $pending[$section]);
+            $pattern = '/^'.preg_quote($heading, '/').'[ \t]*\r?\n(?:^#[^\r\n]*\r?\n)*?^# ={5,}[ \t]*'
+                .'(?:\r?\n[ \t]*(?:export[ \t]+)?'.$keys.'[ \t]*=[^\r\n]*)*/m';
+            if (preg_match($pattern, $env, $matches, PREG_OFFSET_CAPTURE)) {
+                [$block, $offset] = $matches[0];
+                $env = substr_replace($env, $newline.$entries, $offset + strlen($block), 0);
+                if (! str_ends_with($env, "\n")) {
+                    $env .= $newline;
+                }
+
+                continue;
+            }
+
+            $env = rtrim($env, "\r\n");
+            if ($env !== '') {
+                $env .= $newline.$newline;
+            }
+            $env .= implode($newline, [$divider, $heading, '# '.$description, $divider, $entries]).$newline;
+        }
+
+        return $env;
     }
 }

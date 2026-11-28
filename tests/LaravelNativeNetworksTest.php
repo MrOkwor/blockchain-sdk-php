@@ -128,6 +128,74 @@ class LaravelNativeNetworksTest extends TestCase
         }
     }
 
+    public function test_wallet_modes_insert_entries_under_existing_headers_and_preserve_crlf(): void
+    {
+        $envPath = tempnam(sys_get_temp_dir(), 'blockchainsdk-test-');
+        $originalPath = $this->app->environmentPath();
+        $originalFile = $this->app->environmentFile();
+        $this->app->useEnvironmentPath(dirname($envPath))->loadEnvironmentFrom(basename($envPath));
+
+        try {
+            Blockchain::swap(new BlockchainManager(['networks' => [
+                'ethereum' => ['type' => 'evm'],
+                'litecoin' => ['type' => 'litecoin'],
+                'xrp' => ['type' => 'xrp'],
+            ]]));
+            $command = new GenerateMasterWalletsCommand;
+            $command->setLaravel($this->app);
+            $tester = new CommandTester($command);
+            $divider = '# ==============================================================================';
+            $masterHeader = '# BLOCKCHAIN SDK: MASTER COLD VAULT RECEIVING WALLETS';
+            $gasHeader = '# BLOCKCHAIN SDK: HOT GAS STATION WALLETS & PRIVATE KEYS';
+            $seedHeader = '# BLOCKCHAIN SDK: WALLET RECOVERY PHRASE';
+
+            file_put_contents($envPath, implode("\r\n", [
+                'ENV_BEFORE="keep"',
+                $divider, $masterHeader, '# Vault addresses', $divider,
+                'BLOCKCHAIN_MASTER_ETHEREUM="existing-master"',
+                '',
+                $divider, $gasHeader, '# Gas wallets', $divider,
+                'BLOCKCHAIN_GAS_ADDRESS_ETHEREUM="existing-gas-address"',
+                'BLOCKCHAIN_GAS_KEY_ETHEREUM="existing-unprefixed-key"',
+                '',
+                'ENV_AFTER="keep"',
+                '',
+            ]));
+
+            $this->assertSame(0, $tester->execute(['network' => 'ethereum']));
+            $legacy = Dotenv::parse(file_get_contents($envPath));
+            $this->assertSame('existing-gas-address', $legacy['BLOCKCHAIN_GAS_ADDRESS_ETHEREUM']);
+            $this->assertSame('plain:existing-unprefixed-key', $legacy['BLOCKCHAIN_GAS_KEY_ETHEREUM']);
+
+            $this->assertSame(0, $tester->execute(['network' => 'litecoin', '--seed-phrase' => true]));
+            $this->assertSame(0, $tester->execute(['network' => 'xrp']));
+            $env = file_get_contents($envPath);
+            $master = strstr($env, $masterHeader);
+            $gas = strstr($master, $gasHeader);
+            $seed = strstr($gas, $seedHeader);
+            $master = substr($master, 0, strpos($master, $gasHeader));
+            $gas = substr($gas, 0, strpos($gas, 'ENV_AFTER='));
+
+            foreach ([$masterHeader, $gasHeader, $seedHeader] as $header) {
+                $this->assertSame(1, substr_count($env, $header));
+            }
+            foreach (['LITECOIN', 'XRP'] as $network) {
+                $this->assertStringContainsString("BLOCKCHAIN_MASTER_{$network}=", $master);
+                $this->assertStringContainsString("BLOCKCHAIN_GAS_ADDRESS_{$network}=", $gas);
+                $this->assertStringContainsString("BLOCKCHAIN_GAS_KEY_{$network}=", $gas);
+            }
+            $this->assertStringContainsString('BLOCKCHAIN_MASTER_SEED_PHRASE="enc:v1:', $seed);
+            $this->assertStringNotContainsString("\n", str_replace("\r\n", '', $env));
+            $this->assertStringContainsString('ENV_AFTER="keep"', $env);
+
+            $this->assertSame(0, $tester->execute(['network' => 'litecoin', '--seed-phrase' => true]));
+            $this->assertSame($env, file_get_contents($envPath));
+        } finally {
+            $this->app->useEnvironmentPath($originalPath)->loadEnvironmentFrom($originalFile);
+            unlink($envPath);
+        }
+    }
+
     private function command(LitecoinDriver|XrpDriver $driver): CommandTester
     {
         $manager = $this->createMock(BlockchainManager::class);
