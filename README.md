@@ -45,7 +45,7 @@ We maintain a complete, ready-to-run demo application in the **[MrOkwor/blockcha
 
 ## Supported Networks & Driver Identifiers
 
-The SDK supports **17 individual network drivers** out of the box:
+The SDK supports **19 configured networks** out of the box:
 
 | Driver Code | Network Name | Ecosystem | Address Format | Signing Algorithm |
 | :--- | :--- | :--- | :--- | :--- |
@@ -66,6 +66,104 @@ The SDK supports **17 individual network drivers** out of the box:
 | `solana` | Solana | Solana | Base58 Public Key | Ed25519 (Libsodium) |
 | `tron` | TRON | TRON | Base58Check (`T...`) | Secp256k1 + SHA-256 |
 | `bitcoin` | Bitcoin | UTXO | Native SegWit Bech32 (`bc1q...`) | Secp256k1 + BIP-143 |
+| `litecoin` | Litecoin | UTXO | Native SegWit Bech32 (`ltc1q...`) | Secp256k1 + BIP-143 |
+| `xrp` | XRP Ledger | XRPL | Classic Base58Check (`r...`) | Secp256k1 + SHA-512Half |
+
+### Litecoin and XRP Ledger
+
+These drivers work in standalone PHP and Laravel. All configured networks are available;
+there is no separate database-backed network switch. Configured tokens retain the existing
+`status => 'enabled'` / `status => 'disabled'` convention. No tokens are enabled on XRP by default.
+
+- **Litecoin:** native LTC, confirmed UTXO spending, balances, incoming output detection,
+  local signing, broadcasting and sweeps. The default API is `https://litecoinspace.org/api`
+  (Esplora REST, not a Litecoin Core JSON-RPC endpoint). Override with `LITECOIN_RPC_URL`.
+  Generated spendable wallets use native SegWit; legacy L/M addresses are supported as
+  payment destinations. OmniLite, inscriptions, MWEB and Taproot spending are not supported.
+- **XRP Ledger:** native XRP and configured trust-line issued currencies. Default RPCs are
+  `https://xrplcluster.com` and `https://s2.ripple.com:51234`. Override with `XRP_RPC_URL`.
+  MPTs, NFTs, account deletion, cross-currency path finding and multisigning are not supported.
+  Keys are secp256k1 hex and addresses are classic addresses. Supply `destination_tag` when
+  sending to an exchange; use `XRP_SWEEP_DESTINATION_TAG` for a tagged master vault.
+- Deposits use six confirmations for LTC and one validated ledger for XRP by default.
+  Override using `blockchainsdk.confirmations.litecoin` / `.xrp` in Laravel configuration.
+- Configure `BLOCKCHAIN_MASTER_LITECOIN`, `BLOCKCHAIN_MASTER_XRP` and the usual
+  `BLOCKCHAIN_GAS_ADDRESS_*` / `BLOCKCHAIN_GAS_KEY_*` settings. The existing master-wallet
+  generator accepts either new network and can derive both from a recovery phrase in seed mode.
+- XRP native sweeps retain the current ledger reserve, including owned-object reserves,
+  and transaction fees. A reserve-only wallet returns `meta.nothing_to_sweep` with no hash.
+  `accountStatus($address)` reports raw drops; `minimumAccountFunding()` returns XRP.
+
+#### Configure an XRP issued token
+
+Use a unique configuration key for each issuer; a currency symbol alone is not an asset identity.
+The existing `contract` argument carries `currency:issuer`. Both fields are case-sensitive.
+
+```php
+'xrp' => [
+    'type' => 'xrp',
+    'currency' => 'XRP',
+    'rpc_nodes' => ['https://xrplcluster.com', 'https://s2.ripple.com:51234'],
+    'tokens' => [
+        'USD_GATEWAY' => [
+            'name' => 'USD from your selected issuer',
+            'currency' => 'USD',
+            'issuer' => 'REPLACE_WITH_VERIFIED_CLASSIC_ISSUER_ADDRESS',
+            'decimals' => 6,
+            'status' => 'enabled',
+        ],
+    ],
+],
+```
+
+Fund the deposit account and master vault with sufficient XRP, then explicitly establish
+their trust lines before accepting tokens. Enabling a configuration entry does not enroll
+wallets or spend XRP automatically:
+
+```php
+$driver = $sdk->driver('xrp'); // Blockchain::driver('xrp') in Laravel
+$asset = 'USD:'.$verifiedIssuer;
+$enrollment = $driver->establishTrustLine($depositPrivateKey, $asset, '1000000');
+$receipt = $driver->waitForTransactionReceipt($enrollment->txHash);
+// Only expose the token deposit address after successful validation and issuer authorization, if required.
+$balance = $driver->getBalance($depositAddress, $asset);
+$payment = $driver->sendTransaction([
+    'private_key' => $depositPrivateKey,
+    'to' => $masterVault,
+    'token_contract' => $asset,
+    'amount' => '10.5', // Human-readable token units; amount_raw is optional integer accounting units.
+]);
+```
+
+Trust-line tokens have variable ledger precision. This SDK integration deliberately supports
+configured accounting scales of **0–8 decimal places** and amounts that fit its existing
+`decimal(24,8)` accounting tables. Incoming amounts with excess precision are rejected and
+reported by the monitor instead of silently rounded or credited. Configure a scale suitable
+for the accepted asset; more general XRPL precision requires a separate storage upgrade.
+No database migration is required for this bounded support.
+
+Token payments check issuer identity, authorization, frozen trust lines and destination limits.
+Sweep amounts account for issuer transfer fees; deposit crediting uses validated
+`delivered_amount`, never the requested payment amount. Native XRP reserves remain on the
+account after token/native sweeps. `--all` keeps the existing token-first ordering.
+
+#### Pending sweeps and standalone storage
+
+LTC/XRP broadcasts are not recorded as completed sweeps until an on-chain receipt succeeds.
+The Laravel integration remembers pending signed sweep hashes in the configured cache and
+uses atomic wallet locks. Use a persistent cache with lock support; do not clear pending
+sweep state while transactions are unresolved. Repeated passes reconcile the same hash.
+
+Standalone drivers default to **process-local** `MemorySweepStateStore`. For production,
+inject a persistent, shared implementation of `SweepStateStoreInterface` as
+`sweep_state_store` in the manager or network configuration. Its `synchronized()` method
+must provide cross-process exclusion. Call `completeSweep($address, $asset)` only after
+successfully confirming and recording the sweep. A result's `success` means the transaction
+was accepted/submitted; it is not proof of finality. Serialize other outgoing transactions
+from the same account in your application as well, to avoid XRP sequence/UTXO conflicts.
+
+Existing Laravel installations must merge the new network, master-wallet and gas-wallet
+entries into their published config. Avoid overwriting custom RPCs or token entries.
 
 ---
 
@@ -143,6 +241,28 @@ php artisan blockchainsdk:generate-master-wallets --no-store
 php artisan blockchainsdk:generate-master-wallets --no-encrypt
 ```
 
+#### Generate wallets with a recovery phrase
+
+```bash
+php artisan blockchainsdk:generate-master-wallets --seed-phrase
+php artisan blockchainsdk:generate-master-wallets --seed-phrase --show-seed-phrase
+```
+
+Seed mode stores one encrypted 24-word BIP-39 phrase in `BLOCKCHAIN_MASTER_SEED_PHRASE` and writes the derived gas private keys to the existing `BLOCKCHAIN_GAS_KEY_*` settings. Sweeps and gas funding keep using the configured keys. The phrase is reused when generating wallets for additional networks.
+
+The master and gas addresses match by default. An existing `BLOCKCHAIN_MASTER_*` override takes precedence. Existing gas credentials are skipped unless you explicitly pass `--force`, which replaces the selected gas credentials and preserves configured master addresses. Previously generated independent keys cannot be recovered with the new phrase.
+
+Display the phrase in a private terminal using `--show-seed-phrase` and import it using the matching network and derivation path in your wallet app. Keep an offline backup. The stored copy requires the Laravel `APP_KEY` for decryption. `--no-store` prints the phrase and derived addresses without writing credentials to the environment file.
+
+| Network | Derivation path |
+| --- | --- |
+| EVM networks | `m/44'/60'/0'/0/0` |
+| Bitcoin, native SegWit | `m/84'/0'/0'/0/0` |
+| Litecoin, native SegWit | `m/84'/2'/0'/0/0` |
+| TRON | `m/44'/195'/0'/0/0` |
+| XRP Ledger | `m/44'/144'/0'/0/0` |
+| Solana, Ed25519 | `m/44'/501'/0'` |
+
 #### How Master & Gas Wallets Are Stored in `.env`
 ```env
 # ==============================================================================
@@ -186,9 +306,10 @@ For production and staging, we strongly recommend using dedicated RPC providers 
 - **Sign Up**: [https://dashboard.alchemy.com](https://dashboard.alchemy.com)
 - **Setup in `.env`**:
   ```env
-  ALCHEMY_API_KEY="your-alchemy-api-key-here"
+  ETHEREUM_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/your-alchemy-api-key"
+  BASE_RPC_URL="https://base-mainnet.g.alchemy.com/v2/your-alchemy-api-key"
   ```
-  The SDK automatically routes requests to Alchemy for all supported networks when this key is set.
+  Set the corresponding `<CHAIN>_RPC_URL` for each network with a dedicated URL setting, or update that network's `rpc_nodes` in `config/blockchainsdk.php`.
 
 > [!IMPORTANT]
 > **Alchemy Free Tier 10-Block Chunking Notice**:
@@ -568,7 +689,7 @@ class CreditUserOnDepositListener
 
 | Command | Description | Options |
 | :--- | :--- | :--- |
-| `php artisan blockchainsdk:generate-master-wallets` | Generates master cold vault receiving addresses and hot gas station credentials in separated `.env` blocks | `--network=`, `--no-encrypt`, `--no-store`, `--force` |
+| `php artisan blockchainsdk:generate-master-wallets` | Generates master cold vault receiving addresses and hot gas station credentials in separated `.env` blocks | `--network=`, `--no-encrypt`, `--no-store`, `--force`, `--seed-phrase`, `--show-seed-phrase` |
 | `php artisan blockchainsdk:sweep` | Sweeps sub-wallets into central cold vault | `--network=`, `--token=` (symbol/contract), `--all` (token-first sweep), `--sponsor` (auto-gas), `--credit` (dispatch value event) |
 | `php artisan blockchainsdk:monitor` | Multi-chain background deposit confirmation listener | `--network=`, `--token=`, `--strategy=block-ingest\|per-wallet`, `--once` (run single pass) |
 | `php artisan vendor:publish --tag="blockchainsdk-config"` | Publishes `config/blockchainsdk.php` | `--force` (overwrite existing) |
@@ -576,6 +697,24 @@ class CreditUserOnDepositListener
 | `php artisan vendor:publish --tag="blockchainsdk-models"` | Publishes Eloquent models to `app/Models/` | `--force` (overwrite existing) |
 
 ---
+
+### Upgrading to v1.2.0 from v1.1.1
+
+Existing wallets keep their addresses and private keys. This upgrade requires no new SDK database migrations, wallet rotation, or recovery phrase generation.
+
+1. Run `composer update mrokwor/blockchain-sdk-php` if your Composer constraint allows v1.2.0. If it is pinned to an older version, update the constraint to `^1.2` first.
+2. Compare your published `config/blockchainsdk.php` with the package copy under `vendor/mrokwor/blockchain-sdk-php/config/`. Merge the settings you need and preserve your custom RPCs, tokens, and vault addresses. Refresh the Laravel config cache with `php artisan config:cache` if your deployment uses it.
+3. If you use TRON, verify that its configured RPC nodes target the intended network and run a monitor pass. For ERC-20 sends, the SDK now resolves the token's decimals from configuration or the contract. If neither provides usable decimals, pass the correct `decimals` or an exact `amount_raw`.
+
+#### Enable Litecoin or XRP
+
+- Merge the relevant `networks`, `confirmations`, `master_wallets`, and `master_gas_wallets` entries into your published config. Set `LITECOIN_RPC_URL` or `XRP_RPC_URL` if using a dedicated provider. Set `XRP_SWEEP_DESTINATION_TAG` if your XRP vault requires a tag.
+- Use a persistent cache with lock support for pending sweeps. Keep that state while a transaction is unresolved. Test a small deposit and sweep before enabling production traffic.
+- Fund XRP accounts for the ledger reserve. XRP issued tokens also require explicit trust lines. See [Litecoin and XRP Ledger](#litecoin-and-xrp-ledger) for setup and reserve behavior.
+
+#### Generate new wallets with a recovery phrase
+
+Run `php artisan blockchainsdk:generate-master-wallets --seed-phrase`. Existing gas credentials are skipped by default, and custom master addresses are preserved. Add `--show-seed-phrase` in a private terminal to back up or import the phrase. Existing independently generated wallets still require their original keys for recovery. See [Generate wallets with a recovery phrase](#generate-wallets-with-a-recovery-phrase).
 
 ### 9. Upgrading to v1.1.0 from v1.0.x
 

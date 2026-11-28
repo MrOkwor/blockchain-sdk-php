@@ -78,37 +78,7 @@ class EvmDriver implements NetworkDriverInterface
             }
             $rawDec = gmp_strval(gmp_init($hex, 16), 10);
 
-            // 1. Check configured token metadata first (ACC-04b)
-            $decimals = null;
-            if (! empty($this->config['tokens'])) {
-                foreach ($this->config['tokens'] as $token) {
-                    if (strcasecmp($token['contract'] ?? '', $tokenContract) === 0 && isset($token['decimals'])) {
-                        $decimals = (int) $token['decimals'];
-                        break;
-                    }
-                }
-            }
-
-            // 2. Query on-chain decimals() (0x313ce567) if not in static config
-            if ($decimals === null) {
-                try {
-                    $decRes = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
-                    $decHex = $decRes['result'] ?? '';
-                    if (! empty($decHex) && $decHex !== '0x') {
-                        $parsedDec = hexdec($decHex);
-                        if ($parsedDec >= 0 && $parsedDec <= 36) {
-                            $decimals = $parsedDec;
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // Handled by explicit exception below
-                }
-            }
-
-            // 3. Fail explicitly if decimals cannot be established rather than silently guessing 18
-            if ($decimals === null) {
-                throw new \RuntimeException("Cannot determine decimals for token contract [{$tokenContract}]. Please configure decimals in config/blockchainsdk.php.");
-            }
+            $decimals = $this->resolveTokenDecimals($tokenContract);
 
             $formatted = bcpow('10', (string) $decimals) !== '0'
                 ? bcdiv($rawDec, bcpow('10', (string) $decimals), min($decimals, 8))
@@ -190,6 +160,30 @@ class EvmDriver implements NetworkDriverInterface
         return $nextNonce;
     }
 
+    private function resolveTokenDecimals(string $tokenContract): int
+    {
+        foreach ($this->config['tokens'] ?? [] as $token) {
+            if (strcasecmp($token['contract'] ?? '', $tokenContract) === 0 && isset($token['decimals'])) {
+                return (int) $token['decimals'];
+            }
+        }
+
+        try {
+            $response = $this->rpc->call('eth_call', [['to' => $tokenContract, 'data' => '0x313ce567'], 'latest']);
+            $hex = $response['result'] ?? '';
+            if (is_string($hex) && preg_match('/^0x[0-9a-f]{64}$/iD', $hex)) {
+                $decimals = gmp_init($hex, 16);
+                if (gmp_cmp($decimals, 255) <= 0) {
+                    return gmp_intval($decimals);
+                }
+            }
+        } catch (\Throwable $exception) {
+            throw new \RuntimeException("Cannot determine decimals for token contract [{$tokenContract}]. Please configure decimals in config/blockchainsdk.php.", 0, $exception);
+        }
+
+        throw new \RuntimeException("Cannot determine decimals for token contract [{$tokenContract}]. Please configure decimals in config/blockchainsdk.php.");
+    }
+
     public function sendTransaction(array $params): TransactionResult
     {
         $fromPrivateKey = $params['from_private_key'] ?? $params['private_key'] ?? '';
@@ -206,8 +200,10 @@ class EvmDriver implements NetworkDriverInterface
         $tokenContract = $params['token_contract'] ?? null;
         if ($tokenContract && empty($params['data'])) {
             $recipient = $params['to'];
-            $decimals = (int) ($params['decimals'] ?? 18);
-            $amountRaw = (string) ($params['amount_raw'] ?? Decimal::toBaseUnit($params['amount'] ?? '0', $decimals));
+            $amountRaw = (string) ($params['amount_raw'] ?? Decimal::toBaseUnit(
+                $params['amount'] ?? '0',
+                (int) ($params['decimals'] ?? $this->resolveTokenDecimals($tokenContract))
+            ));
             $params['to'] = $tokenContract;
             $params['data'] = EvmTransactionSigner::buildErc20TransferData($recipient, $amountRaw);
             $params['value'] = '0';

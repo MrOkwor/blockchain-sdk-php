@@ -16,6 +16,11 @@ return [
     */
     'default' => env('BLOCKCHAIN_DEFAULT_NETWORK', 'ethereum'),
 
+    'confirmations' => [
+        'litecoin' => 6,
+        'xrp' => 1,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | EVM eth_getLogs Block Range Chunk Size
@@ -62,6 +67,8 @@ return [
         'solana' => env('BLOCKCHAIN_MASTER_SOLANA'),
         'tron' => env('BLOCKCHAIN_MASTER_TRON'),
         'bitcoin' => env('BLOCKCHAIN_MASTER_BITCOIN'),
+        'litecoin' => env('BLOCKCHAIN_MASTER_LITECOIN'),
+        'xrp' => env('BLOCKCHAIN_MASTER_XRP'),
     ],
 
     /*
@@ -77,6 +84,14 @@ return [
     |
     */
     'master_gas_wallets' => [
+        'litecoin' => [
+            'address' => env('BLOCKCHAIN_GAS_ADDRESS_LITECOIN'),
+            'private_key' => env('BLOCKCHAIN_GAS_KEY_LITECOIN'),
+        ],
+        'xrp' => [
+            'address' => env('BLOCKCHAIN_GAS_ADDRESS_XRP'),
+            'private_key' => env('BLOCKCHAIN_GAS_KEY_XRP'),
+        ],
         'ethereum' => [
             'address' => env('BLOCKCHAIN_GAS_ADDRESS_ETHEREUM'),
             'private_key' => env('BLOCKCHAIN_GAS_KEY_ETHEREUM'),
@@ -395,6 +410,33 @@ return [
                 'USDC' => ['name' => 'USD Coin',   'contract' => 'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8', 'decimals' => 6, 'status' => 'enabled'],
                 'USDD' => ['name' => 'Decentralized USD', 'contract' => 'TPYmHEhy5n8TCEfYGqW2rPxsghSfzghPDn', 'decimals' => 18, 'status' => 'enabled'],
             ],
+        ],
+
+        'litecoin' => [
+            'type' => 'litecoin',
+            'currency' => 'LTC',
+            'decimals' => 8,
+            'rpc_nodes' => array_values(array_filter([
+                env('LITECOIN_RPC_URL'),
+                'https://litecoinspace.org/api',
+            ])),
+            'tokens' => [],
+        ],
+
+        'xrp' => [
+            'type' => 'xrp',
+            'currency' => 'XRP',
+            'decimals' => 6,
+            'max_fee_drops' => 100000,
+            'sweep_destination_tag' => env('XRP_SWEEP_DESTINATION_TAG') !== null ? (int) env('XRP_SWEEP_DESTINATION_TAG') : null,
+            'rpc_nodes' => array_values(array_filter([
+                env('XRP_RPC_URL'),
+                'https://xrplcluster.com',
+                'https://s2.ripple.com:51234',
+            ])),
+            // Opt in to issued tokens with currency, issuer, decimals (0–8), and status.
+            // No trust line or reserve funding is created automatically by enabling a token.
+            'tokens' => [],
         ],
 
         'bitcoin' => [

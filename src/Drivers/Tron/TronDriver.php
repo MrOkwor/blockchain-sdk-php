@@ -327,38 +327,12 @@ class TronDriver implements NetworkDriverInterface
     public function getLatestIncomingTxHash(string $address, ?string $tokenContract = null): ?string
     {
         try {
-            $client = new Client(['timeout' => 5, 'http_errors' => false]);
-            if ($tokenContract) {
-                $url = "https://api.trongrid.io/v1/accounts/{$address}/transactions/trc20?limit=5";
-                $res = $client->get($url);
-                if ($res->getStatusCode() === 200) {
-                    $data = json_decode($res->getBody()->getContents(), true);
-                    foreach ($data['data'] ?? [] as $tx) {
-                        $to = $tx['to'] ?? '';
-                        if ($to === $address) {
-                            return $tx['transaction_id'] ?? null;
-                        }
-                    }
-                }
-            } else {
-                $url = "https://api.trongrid.io/v1/accounts/{$address}/transactions?limit=5";
-                $res = $client->get($url);
-                if ($res->getStatusCode() === 200) {
-                    $data = json_decode($res->getBody()->getContents(), true);
-                    foreach ($data['data'] ?? [] as $tx) {
-                        $param = $tx['raw_data']['contract'][0]['parameter']['value'] ?? [];
-                        $to = $param['to_address'] ?? '';
-                        if (! empty($tx['txID'])) {
-                            return $tx['txID'];
-                        }
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            // Silently fallback
-        }
+            $transfers = $this->getIncomingTransactions($address, $tokenContract, limit: 5);
 
-        return null;
+            return $transfers[0]['tx_hash'] ?? null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function getTransactionReceipt(string $txHash): ?TransactionReceipt

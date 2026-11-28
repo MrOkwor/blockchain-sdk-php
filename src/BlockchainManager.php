@@ -5,8 +5,10 @@ namespace BlockchainSdk;
 use BlockchainSdk\Contracts\NetworkDriverInterface;
 use BlockchainSdk\Drivers\Bitcoin\BitcoinDriver;
 use BlockchainSdk\Drivers\Evm\EvmDriver;
+use BlockchainSdk\Drivers\Litecoin\LitecoinDriver;
 use BlockchainSdk\Drivers\Solana\SolanaDriver;
 use BlockchainSdk\Drivers\Tron\TronDriver;
+use BlockchainSdk\Drivers\Xrp\XrpDriver;
 use Illuminate\Support\Facades\Crypt;
 use InvalidArgumentException;
 
@@ -123,6 +125,12 @@ class BlockchainManager
     {
         $network = strtolower($network);
         $tokens = $this->config['networks'][$network]['tokens'] ?? [];
+        if (($this->config['networks'][$network]['type'] ?? $network) === 'xrp') {
+            foreach ($tokens as &$token) {
+                $token['contract'] ??= ($token['currency'] ?? '').':'.($token['issuer'] ?? '');
+            }
+            unset($token);
+        }
 
         if (! $onlyEnabled) {
             return $tokens;
@@ -139,7 +147,8 @@ class BlockchainManager
     {
         $tokens = $this->getSupportedTokens($network, $onlyEnabled);
         foreach ($tokens as $sym => $token) {
-            if (strcasecmp($sym, $symbolOrContract) === 0 || strcasecmp($token['contract'] ?? '', $symbolOrContract) === 0) {
+            $isXrp = ($this->config['networks'][strtolower($network)]['type'] ?? strtolower($network)) === 'xrp';
+            if (strcasecmp($sym, $symbolOrContract) === 0 || ($isXrp ? ($token['contract'] ?? '') === $symbolOrContract : strcasecmp($token['contract'] ?? '', $symbolOrContract) === 0)) {
                 return array_merge(['symbol' => $sym], $token);
             }
         }
@@ -167,12 +176,15 @@ class BlockchainManager
         }
 
         $type = $networkConfig['type'] ?? $network;
+        $networkConfig['sweep_state_store'] ??= $this->config['sweep_state_store'] ?? null;
 
         return match (strtolower($type)) {
             'ethereum', 'evm', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'avalanche', 'fantom', 'cronos', 'linea', 'scroll', 'zksync', 'celo', 'mantle' => new EvmDriver($networkConfig),
             'solana' => new SolanaDriver($networkConfig),
             'bitcoin' => new BitcoinDriver($networkConfig),
             'tron' => new TronDriver($networkConfig),
+            'litecoin' => new LitecoinDriver($networkConfig),
+            'xrp' => new XrpDriver($networkConfig),
             default => throw new InvalidArgumentException("Unsupported blockchain driver type [{$type}]."),
         };
     }

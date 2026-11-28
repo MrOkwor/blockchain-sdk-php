@@ -17,7 +17,7 @@ class TransactionResult
      * Gas fee spent in native token (human-readable).
      * Computed from receipt if available.
      */
-    public function feeSpent(int $decimals = 18): ?string
+    public function feeSpent(?int $decimals = null): ?string
     {
         return $this->receipt?->feeSpent($decimals);
     }

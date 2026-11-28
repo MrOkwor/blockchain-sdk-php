@@ -4,6 +4,8 @@ namespace BlockchainSdk\Laravel\Commands;
 
 use App\Models\BlockchainSdkDeposit;
 use App\Models\BlockchainSdkWallet;
+use BlockchainSdk\Drivers\Litecoin\LitecoinDriver;
+use BlockchainSdk\Drivers\Xrp\XrpDriver;
 use BlockchainSdk\Laravel\Events\DepositConfirmed;
 use BlockchainSdk\Laravel\Events\DepositDetected;
 use BlockchainSdk\Laravel\Facades\Blockchain;
@@ -69,8 +71,12 @@ class MonitorCommand extends Command
                 'bsc' => 3,
                 'tron' => 19,
                 'bitcoin' => 2,
+                'litecoin' => 6,
+                'xrp' => 1,
                 default => 1,
             });
+
+            $scanAllPages = $driver instanceof LitecoinDriver || $driver instanceof XrpDriver;
 
             // 1. Process pending unconfirmed deposits first to advance their confirmations
             $pendingDeposits = $depositModel::where('network', $network)
@@ -79,7 +85,9 @@ class MonitorCommand extends Command
 
             foreach ($pendingDeposits as $pendingDeposit) {
                 try {
-                    $transfers = $driver->getIncomingTransactions($pendingDeposit->to_address, $pendingDeposit->token_contract, (int) ($pendingDeposit->decimals ?? 18), 5);
+                    $transfers = $driver instanceof LitecoinDriver
+                        ? $driver->getIncomingTransactionOutputs($pendingDeposit->to_address, $pendingDeposit->tx_hash)
+                        : $driver->getIncomingTransactions($pendingDeposit->to_address, $pendingDeposit->token_contract, (int) ($pendingDeposit->decimals ?? 18), $scanAllPages ? PHP_INT_MAX : 5);
 
                     foreach ($transfers as $tx) {
                         $txLogIndex = (int) ($tx['log_index'] ?? 0);
@@ -221,7 +229,7 @@ class MonitorCommand extends Command
                     $tokenDecimals = (int) ($token['decimals'] ?? 18);
 
                     try {
-                        $incomingTransfers = $driver->getIncomingTransactions($wallet->address, $tokenContract, $tokenDecimals, 10);
+                        $incomingTransfers = $driver->getIncomingTransactions($wallet->address, $tokenContract, $tokenDecimals, $scanAllPages ? PHP_INT_MAX : 10);
 
                         foreach ($incomingTransfers as $transfer) {
                             $txHash = $transfer['tx_hash'];
@@ -284,12 +292,12 @@ class MonitorCommand extends Command
                 // B. Scan native currency transfers
                 try {
                     $nativeDecimals = match ($network) {
-                        'tron' => 6,
+                        'tron', 'xrp' => 6,
                         'solana' => 9,
-                        'bitcoin' => 8,
+                        'bitcoin', 'litecoin' => 8,
                         default => 18,
                     };
-                    $nativeTransfers = $driver->getIncomingTransactions($wallet->address, null, $nativeDecimals, 5);
+                    $nativeTransfers = $driver->getIncomingTransactions($wallet->address, null, $nativeDecimals, $scanAllPages ? PHP_INT_MAX : 5);
 
                     foreach ($nativeTransfers as $transfer) {
                         $txHash = $transfer['tx_hash'];

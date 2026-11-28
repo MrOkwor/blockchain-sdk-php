@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.2.0] - 2026-11-28
+
+### Added
+
+- Litecoin native SegWit and XRP Ledger wallet generation, signing, deposit monitoring, and sweeping. XRP also supports configured issued tokens, explicit trust-line setup, and destination tags.
+- Opt-in BIP-39 recovery phrase generation for master and gas wallets. The SDK stores one encrypted phrase and writes the derived private keys to the existing gas key settings. Legacy credentials and custom master addresses are preserved by default.
+- Persistent sweep state support for LTC and XRP, with Laravel cache-backed locking and receipt-based reconciliation.
+
+### Fixed
+
+- LTC and XRP monitoring follows history pagination. The monitor checks pending LTC deposits directly by transaction ID.
+- LTC sweep reconciliation matches spent outputs. XRP reconciliation applies the swept amount to whole eligible deposits in ledger order. XRP retries resubmit the same signed transaction while it remains valid.
+- TRON's latest incoming transaction lookup now uses the configured RPC nodes.
+- ERC-20 sends resolve decimals from the token configuration or contract when callers supply a decimal amount without explicit decimals. Callers can still pass exact base units.
+
+### Documentation
+
+- Added the [v1.2.0 upgrade guide](README.md#upgrading-to-v120-from-v111) and documented Alchemy setup through per-chain RPC URLs.
+
+---
+
 ## [v1.1.1] - 2026-10-30
 
 ### 🚀 Non-EVM Incoming Deposit Detection & Multi-Chain Monitor Upgrade

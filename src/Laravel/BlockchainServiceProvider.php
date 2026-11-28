@@ -18,7 +18,10 @@ class BlockchainServiceProvider extends ServiceProvider
         );
 
         $this->app->singleton('blockchainsdk', function ($app) {
-            return new BlockchainManager($app['config']['blockchainsdk'] ?? []);
+            $config = $app['config']['blockchainsdk'] ?? [];
+            $config['sweep_state_store'] ??= new CacheSweepStateStore($app['cache']->store());
+
+            return new BlockchainManager($config);
         });
 
         $this->app->alias('blockchainsdk', BlockchainManager::class);

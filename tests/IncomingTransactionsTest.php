@@ -4,6 +4,7 @@ namespace BlockchainSdk\Tests;
 
 use BlockchainSdk\Crypto\Base58;
 use BlockchainSdk\Drivers\Bitcoin\BitcoinDriver;
+use BlockchainSdk\Drivers\Evm\EvmDriver;
 use BlockchainSdk\Drivers\Solana\SolanaDriver;
 use BlockchainSdk\Drivers\Tron\TronDriver;
 use BlockchainSdk\Http\RpcClient;
@@ -16,6 +17,41 @@ class IncomingTransactionsTest extends TestCase
     {
         $reflector = new ReflectionProperty($driver, 'rpc');
         $reflector->setValue($driver, $rpc);
+    }
+
+    public function test_erc20_send_resolves_decimals_before_encoding_the_transfer(): void
+    {
+        $contract = '0x1111111111111111111111111111111111111111';
+        $recipient = '0x2222222222222222222222222222222222222222';
+        $gasEstimate = null;
+        $rpc = $this->createMock(RpcClient::class);
+        $rpc->expects($this->exactly(3))
+            ->method('call')
+            ->willReturnCallback(function (string $method, array $params) use (&$gasEstimate): array {
+                if ($method === 'eth_estimateGas') {
+                    $gasEstimate = $params[0];
+
+                    throw new \RuntimeException('execution reverted');
+                }
+
+                return match ($method) {
+                    'eth_gasPrice' => ['result' => '0x1'],
+                    'eth_call' => ['result' => '0x'.str_pad('6', 64, '0', STR_PAD_LEFT)],
+                };
+            });
+
+        $driver = new EvmDriver([]);
+        $this->injectRpc($driver, $rpc);
+        $driver->sendTransaction([
+            'private_key' => '0x'.str_pad('1', 64, '0', STR_PAD_LEFT),
+            'to' => $recipient,
+            'token_contract' => $contract,
+            'amount' => '1',
+            'nonce' => 0,
+        ]);
+
+        $this->assertSame($contract, $gasEstimate['to']);
+        $this->assertSame('a9059cbb'.str_pad(substr($recipient, 2), 64, '0', STR_PAD_LEFT).str_pad('f4240', 64, '0', STR_PAD_LEFT), $gasEstimate['data']);
     }
 
     public function test_tron_driver_detects_incoming_trc20_token_transfers(): void
@@ -87,6 +123,7 @@ class IncomingTransactionsTest extends TestCase
 
         $this->assertCount(1, $transfers);
         $this->assertSame('0x_tron_token_tx_1', $transfers[0]['tx_hash']);
+        $this->assertSame('0x_tron_token_tx_1', $driver->getLatestIncomingTxHash($recipientBase58, $contractBase58));
         $this->assertSame('100.000000', (string) $transfers[0]['amount']);
         $this->assertSame(11, $transfers[0]['confirmations']);
         $this->assertSame(990, $transfers[0]['block_number']);

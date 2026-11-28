@@ -13,7 +13,8 @@ class TransactionReceipt implements ArrayAccess
         public readonly string $effectiveGasPrice,
         public readonly bool $isSuccessful,
         public readonly array $logs = [],
-        public readonly array $raw = []
+        public readonly array $raw = [],
+        public readonly int $nativeDecimals = 18
     ) {}
 
     /**
@@ -27,9 +28,9 @@ class TransactionReceipt implements ArrayAccess
     /**
      * Calculate fee in human-readable native token units.
      */
-    public function feeSpent(int $decimals = 18): string
+    public function feeSpent(?int $decimals = null): string
     {
-        $divisor = bcpow('10', (string) $decimals);
+        $divisor = bcpow('10', (string) ($decimals ?? $this->nativeDecimals));
 
         return $divisor !== '0' ? bcdiv($this->feeWei(), $divisor, 12) : '0';
     }
